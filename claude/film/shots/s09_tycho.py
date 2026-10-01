@@ -1,0 +1,464 @@
+"""s09_tycho · 1:50.221–1:58.333 (t15 v4: tests/t15_tycho/s09t.py)  you have left: Tycho's world without its Sun.
+
+Tycho Brahe's system (1588): the Earth fixed at the centre, the Moon and the Sun go round it, the five planets go
+round the Sun. Me = the Earth (the gap ring at the centre); you = the Sun (☉, as in s08c). Everything really turned
+round you; I was kept at the centre by an axiom.
+
+At 112.22 the Sun is removed. The news — light and gravity — spreads from where it was at a finite speed. Each body
+keeps going round the empty place until the news reaches it, then goes straight on (inertia). The Earth is one of
+those bodies. Drawn in Tycho's frame (the Earth fixed, axes on the stars), so every position is its true one minus
+the Earth's: the empty place keeps circling me until the news reaches me; Mercury and Venus, freed first, loop
+(because I am still turning); then the empty place drifts off with the outer planets still going round it, and
+they are let go one by one. Really I am the one thrown away; by Tycho's axiom it is the world that leaves me.
+  111.5    s08c's rings slide off the centre and become Tycho's circles, their furniture with them
+  112.22   You have left: sol removed — the last light leaves the empty place; inside it the lattice is dark
+  113.10   Mercury · 114.18 Venus · 114.92 me (the news reaches me: I can no longer see you; the empty place drifts off)
+  115.78   Mars · 116.50 Jupiter · 117.274 ISOLATION: Saturn, the last; only me, and the Moon, unlit, going round me
+(Light is compressed for the eye: orbital speeds exceed it. The radii are fixed by the beats, as Tycho's were not to scale.)
+"""
+import math, importlib.util
+from pathlib import Path
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+FILM = HERE.parents[1] / 'film'
+_spec = importlib.util.spec_from_file_location('s08c_for_t15', FILM / 'shots' / 's08c_chart.py')
+S8 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(S8)
+
+T_START, T0, T_ISO, T_END = 110.221, 112.22, 117.274, 118.333       # from COMPLETION (no crack)
+MORPH = .55
+T_CMD = 110.90                                            # Though you have left: the command typed, not yet run
+T_HOLD = T_START + MORPH
+RELEASE = {'Mercurius': 113.10, 'Venus': 114.18, 'Terra': 114.92, 'Mars': 115.78, 'Iuppiter': 116.50, 'Saturnus': 117.274}
+C = .39 / (RELEASE['Mercurius'] - T0)                    # the speed of the news (units / s, compressed)
+A = {k: C * (v - T0) for k, v in RELEASE.items()}        # orbit radii round the Sun, fixed by the beats
+TE = 5.0                                                  # the Earth's year (s)
+PH = {'Terra': math.radians(270) + 2 * math.pi / 5.0 * (112.22 - 110.5),   # the Sun at the top at 110.5
+       'Mercurius': 1.9, 'Venus': 4.3, 'Mars': .6, 'Iuppiter': 2.7, 'Saturnus': 5.2}
+LUNA_R, LUNA_T = .54, 1.6
+PX0 = 121.                                                # px per unit, after the morph (then the eye draws back)
+GLY = {'Sol': '☉', 'Terra': '⊕', 'Luna': '☽', 'Mercurius': '☿', 'Venus': '♀', 'Mars': '♂', 'Iuppiter': '♃', 'Saturnus': '♄'}
+PLANETS = ['Mercurius', 'Venus', 'Mars', 'Iuppiter', 'Saturnus']
+
+SRC = S8.SRC                                               # shown exactly as s08c is
+POST = dict(S8.POST)
+clamp, ease, outc, lerp = S8.clamp, S8.ease, S8.outc, S8.lerp
+WARM, GOLD, GREEN, DIM, COP = S8.WARM, S8.GOLD, S8.GREEN, S8.DIM, S8.COP
+
+
+def params(t): return {}
+
+
+# ============================================================ the physics (true frame: the Sun at the origin)
+def omega(n): return 2 * math.pi / (TE * (A[n] / A['Terra']) ** 1.5)
+
+
+def true_pos(n, t):
+    a, w = A[n], omega(n)
+    tr = RELEASE[n]
+    def circ(tt): return a * math.cos(PH[n] + w * (tt - T0)), a * math.sin(PH[n] + w * (tt - T0))
+    if t <= tr: return circ(t)
+    x, y = circ(tr)
+    vx, vy = -a * w * math.sin(PH[n] + w * (tr - T0)), a * w * math.cos(PH[n] + w * (tr - T0))
+    return x + vx * (t - tr), y + vy * (t - tr)
+
+
+def geo(n, t):
+    """Tycho's frame: the Earth fixed"""
+    e = true_pos('Terra', t)
+    if n == 'Sol': return -e[0], -e[1]                    # the Sun, or after T0 the empty place it left
+    if n == 'Luna':
+        a = 2 * math.pi * (t - T0) / LUNA_T + 2.2
+        return LUNA_R * math.cos(a), LUNA_R * math.sin(a)
+    p = true_pos(n, t)
+    return p[0] - e[0], p[1] - e[1]
+
+
+def lit(n, t):
+    """is it still lit: has the last light passed it (light from the Sun's place, the origin of the true frame)"""
+    if t < T0: return 1.
+    if n == 'Luna':
+        e = true_pos('Terra', t); g = geo('Luna', t); p = (e[0] + g[0], e[1] + g[1])
+    elif n == 'Sol': return 0.
+    else: p = true_pos(n, t)
+    r = math.hypot(*p)
+    return 1 - ease((C * (t - T0) - r) / .06)
+
+
+# ============================================================ the picture
+CEN0, CEN1 = (960., 470.), (960., 500.)
+KPX0 = S8.Cam(T0, 1920.).P(1., 0.)[0] - 960.              # s08c's px per world unit at the end
+
+
+def cen(t): m = ease((t - T_START) / MORPH); return lerp(CEN0[0], CEN1[0], m), lerp(CEN0[1], CEN1[1], m)
+
+
+def PXf(t): return PX0 * (1 - .17 * ease((t - 113.0) / 3.5))
+
+
+def scr(t, g):
+    c = cen(t); P = PXf(t); return c[0] + g[0] * P, c[1] - g[1] * P
+
+
+def ring_pts(c, R, crack=0., n=None, a0=None, a1=None):
+    n = n or max(60, int(R * 1.6))
+    lo, hi = (180 + crack, 540 - crack) if a0 is None else (a0, a1)
+    return [(c[0] + R * math.cos(S8.clock(lo + (hi - lo) * i / n)), c[1] - R * math.sin(S8.clock(lo + (hi - lo) * i / n))) for i in range(n + 1)]
+
+
+PLANET = {  # radius (px), colour, extra
+    'Mercurius': (4.6, (150, 140, 128), None), 'Venus': (6.2, (214, 196, 150), None), 'Mars': (5.2, (196, 102, 66), None),
+    'Iuppiter': (8.8, (200, 168, 128), 'bands'), 'Saturnus': (7.2, (204, 184, 132), 'ring'), 'Luna': (4.4, (160, 158, 152), 'maria')}
+
+
+def planet_art(c, p, n, L, sun, a):
+    """a small disc with its own face: dim on the night side; lit toward the Sun while the light lasts"""
+    if a <= .01: return
+    r, col, extra = PLANET[n]
+    k = .32 + .68 * L
+    base = tuple(int(v * k * .62) for v in col)
+    if extra == 'ring':                                              # Saturn's ring, behind
+        c.line([(p[0] + r * 2.1 * math.cos(u), p[1] + r * .62 * math.sin(u)) for u in [math.pi + math.pi * i / 20 for i in range(21)]],
+               tuple(int(v * k * .8) for v in col), 220 * a, .9)
+    c.dot(*p, r, base, 255 * a)
+    if L > .02:
+        dx, dy = sun[0] - p[0], sun[1] - p[1]; dd = math.hypot(dx, dy) + 1e-6
+        c.dot(p[0] + dx / dd * r * .32, p[1] + dy / dd * r * .32, r * .72, tuple(int(v * .75) for v in col), 255 * a * L)
+        c.dot(p[0] + dx / dd * r * .5, p[1] + dy / dd * r * .5, r * .3, (255, 246, 228), 120 * a * L)
+    if extra == 'bands':
+        for yy in (-.35, .1, .45):
+            c.line([(p[0] - r * math.sqrt(max(1 - yy * yy, 0)) * .95, p[1] + yy * r), (p[0] + r * math.sqrt(max(1 - yy * yy, 0)) * .95, p[1] + yy * r)],
+                   tuple(int(v * k * .38) for v in col), 230 * a, .6)
+    if extra == 'maria':
+        c.dot(p[0] - r * .25, p[1] - r * .15, r * .3, tuple(int(v * k * .4) for v in col), 200 * a)
+        c.dot(p[0] + r * .3, p[1] + r * .25, r * .22, tuple(int(v * k * .4) for v in col), 200 * a)
+    if extra == 'ring':                                              # Saturn's ring, in front
+        c.line([(p[0] + r * 2.1 * math.cos(u), p[1] + r * .62 * math.sin(u)) for u in [math.pi * i / 20 for i in range(21)]],
+               tuple(int(v * k * .9) for v in col), 240 * a, .9)
+    c.line(ring_pts(p, r + .6, n=24), WARM, 110 * a, .5)
+
+
+def draw(t, w, h):
+    c = S8.Cv(w, h); Wt = c.Wt
+    m = ease((t - T_START) / MORPH)
+    crack = 0.
+    PX = PXf(t)
+    C0 = cen(t)
+    sun = scr(t, geo('Sol', t))
+    gone = ease((t - T0) / .25)                                # the Sun removed
+
+    # ---------------- the lattice: lit from the Sun's side; dark inside the last light
+    front = max(0., C * (t - T0)) * PX
+    sunang = math.atan2(-(sun[1] - C0[1]), sun[0] - C0[0])
+    for gx in range(-44, 45):
+        for gy in range(-24, 25):
+            x, y = C0[0] + gx * 21.2, C0[1] + gy * 21.2
+            if not (-10 < x < Wt + 10 and 60 < y < 872): continue
+            ang = math.atan2(-(y - C0[1]), x - C0[0])
+            day = .55 + .45 * math.cos(ang - sunang)
+            d_s = math.hypot(x - sun[0], y - sun[1])
+            if t >= T0:
+                day *= 1 - .85 * ease((front - d_s) / 30.)        # the last light has passed: dark
+                day += 1.4 * math.exp(-abs(d_s - front) / 9.) * (t < T_ISO + .5)
+            e = (.13 + .05 * ((gx * 7 + gy * 13) % 5) / 4) * day
+            c.dot(x, y, .9, WARM, 255 * e)
+    # the front itself: the edge of the last light
+    if T0 <= t < T_ISO + .8 and front > 2:
+        c.line(ring_pts(sun, front, n=int(60 + front)), (255, 244, 220), 150 * (1 - ease((t - T_ISO) / .8)), 1.1)
+
+    # ---------------- the circles: s08c's rings sliding off the centre into Tycho's, furniture and all
+    def ring_geom(R8, n_tgt, R_tgt_units, centred_on_sun=True):
+        tgt_c = sun if centred_on_sun else C0
+        cc = (lerp(C0[0], tgt_c[0], m) if centred_on_sun else C0[0], lerp(C0[1], tgt_c[1], m) if centred_on_sun else C0[1])
+        if m < 1 and centred_on_sun: cc = (lerp(CEN0[0], tgt_c[0], m), lerp(CEN0[1], tgt_c[1], m))
+        R = lerp(R8 * KPX0, R_tgt_units * PX, m)
+        rel = 1. if n_tgt is None else (1 - ease((t - RELEASE[n_tgt] - .05) / .5))
+        return cc, R, rel
+    # Sun's orbit round me (was the degree ring)
+    cc, R, _ = ring_geom(.30, None, A['Terra'], centred_on_sun=False)
+    oa = 1 - ease((t - RELEASE['Terra'] - .05) / .6)
+    if oa > 0:
+        c.line(ring_pts(cc, R, crack), GOLD, 150 * oa, 1.)
+        for i in range(0, 360, 4):
+            cd = 180 + i; L = (10 if i % 30 == 0 else 5) * (R / 141)
+            a_ = S8.clock(cd)
+            c.line([(cc[0] + R * math.cos(a_), cc[1] - R * math.sin(a_)), (cc[0] + (R + L) * math.cos(a_), cc[1] - (R + L) * math.sin(a_))], GOLD, 90 * oa, .7)
+    # Mercury (planet ring, glyphs ride it), Venus (the hours), Mars (the band of twelve), Jupiter (dotted), Saturn (outer, ticks)
+    for n, R8, kind in (('Mercurius', .45, 'plain'), ('Venus', .568, 'hours'), ('Mars', .71, 'band'), ('Iuppiter', .824, 'dots'), ('Saturnus', .887, 'ticks')):
+        cc, R, rel = ring_geom(R8, n, A[n])
+        if rel <= 0: continue
+        a = rel * (.55 + .45 * lit(n, t) if t > T0 else 1.)
+        if kind == 'dots':
+            for p in ring_pts(cc, R, crack, n=int(R * .9))[::1]: c.dot(*p, 1.2, WARM, 140 * a)
+            continue
+        c.line(ring_pts(cc, R, crack), WARM if kind != 'band' else GOLD, 120 * a, .9)
+        if kind == 'hours':
+            for i in range(12):
+                cd = i * 30
+                if crack > 0 and abs(((cd % 360) + 360) % 360 - 180) < crack + 6: continue
+                a_ = S8.clock(cd)
+                c.text(cc[0] + (R + 13 * (R / 252) + 6) * math.cos(a_), cc[1] - (R + 13 * (R / 252) + 6) * math.sin(a_), S8.ROMAN[i],
+                       'GARA.TTF', max(6., 12 * (R / 252) ** .5), WARM, 150 * a, angle=-cd)
+        if kind == 'band':
+            c.line(ring_pts(cc, R + 14 * (R / 310) + 6, crack), GOLD, 90 * a, .7)
+            for k in range(24):
+                cd = k * 15
+                if crack > 0 and abs(((cd % 360) + 360) % 360 - 180) < crack: continue
+                a_ = S8.clock(cd); r2 = R + 14 * (R / 310) + 6
+                c.line([(cc[0] + R * math.cos(a_), cc[1] - R * math.sin(a_)), (cc[0] + r2 * math.cos(a_), cc[1] - r2 * math.sin(a_))], GOLD, 80 * a, .6)
+        if kind == 'ticks':
+            for i in range(0, 360, 6):
+                cd = 180 + i
+                if crack > 0 and abs(((cd % 360) + 360) % 360 - 180) < crack: continue
+                a_ = S8.clock(cd); L = (12 if i % 30 == 0 else 5) * max(R / 413, .5)
+                c.line([(cc[0] + R * math.cos(a_), cc[1] - R * math.sin(a_)), (cc[0] + (R + L) * math.cos(a_), cc[1] - (R + L) * math.sin(a_))], WARM, 110 * a, .7)
+    # the Moon's little circle round me
+    ma = ease((t - T_START - .3) / .4)
+    c.line(ring_pts(C0, LUNA_R * PX, n=80), WARM, 60 * ma, .6)
+
+    # ---------------- the hold: Tycho's circles on circles, spelt out — arms from me to you, from you to each planet; names
+    ha_ = ease((t - T_HOLD) / .3)
+    if ha_ > 0:
+        a_me = ha_ * (1 - ease((t - RELEASE['Terra'] - .05) / .4))
+        if a_me > 0: c.line([C0, sun], WARM, 120 * a_me, .8)
+        for n in PLANETS:
+            ap = ha_ * (1 - ease((t - RELEASE[n] - .02) / .3))
+            if ap > 0: c.line([sun, scr(t, geo(n, t))], GOLD, 100 * ap, .6)
+        nm = ha_ * (1 - ease((t - T0 - .4) / .5))
+        if nm > 0:
+            for n in PLANETS:
+                p = scr(t, geo(n, t)); c.text(p[0] + 14, p[1] + 14, n, 'GARAIT.TTF', 10, WARM, 200 * nm, anchor='lm')
+            c.text(sun[0] + 20, sun[1] + 16, 'Sol · tu', 'GARAIT.TTF', 11, WARM, 230 * nm, anchor='lm')
+            c.text(C0[0] + 40, C0[1] + 26, 'Terra · ego', 'GARAIT.TTF', 11, WARM, 230 * nm, anchor='lm')
+            mp_ = scr(t, geo('Luna', t)); c.text(mp_[0] + 10, mp_[1] + 12, 'Luna', 'GARAIT.TTF', 9, WARM, 180 * nm, anchor='lm')
+    # ---------------- trails: where each has been (Tycho's frame)
+    for n in PLANETS + ['Sol']:
+        if t < T_START + .2: break
+        pts, al = [], []
+        for k in range(0, 72):
+            tt = t - k * .02
+            if tt < T_START + .2: break
+            pts.append(scr(t, geo(n, tt)))
+        if len(pts) > 2:
+            for k in range(0, len(pts) - 2, 2):
+                f = 1 - k / len(pts)
+                col = GOLD if n != 'Sol' else (255, 236, 200)
+                c.line(pts[k:k + 3], col, (170 if t > T0 else 70) * f * ma, 1. if n != 'Sol' else 1.3)
+
+    # ---------------- the bodies
+    # you: a star; removed at T0 — a flash, then the empty place, a dashed ring that keeps going round me
+    if t < T0 + .3:
+        sa = (1 - gone) * ease((t - T_START) / .4)
+        c.dot(*sun, 6, (255, 250, 238), 230 * sa); c.dot(*sun, 12, WARM, 45 * sa); c.dot(*sun, 22, WARM, 12 * sa)
+        c.text(sun[0] + 20, sun[1] - 18, '☉', 'seguisym.ttf', 15, WARM, 220 * sa)
+        if t >= T0:
+            k = math.exp(-(t - T0) / .1); c.dot(*sun, 30 * (1 - k) + 5, (255, 250, 240), 180 * k)
+    if t >= T0:
+        va = ease((t - T0 - .1) / .3) * (1 - ease((t - T_ISO - .2) / .5))
+        pts = ring_pts(sun, 15, n=36)
+        for i in range(0, len(pts) - 1, 2): c.line(pts[i:i + 2], WARM, 210 * va, .9)
+        c.text(sun[0], sun[1], '☉', 'seguisym.ttf', 13, WARM, 90 * va)
+    # the merged mark ⊙ (s08c) parts: the Sun goes out to its orbit
+    if t < T_START + .4:
+        p = (CEN0[0], CEN0[1] - .45 * KPX0)
+        c.text(*p, '⊙', 'seguisym.ttf', 18, WARM, 255 * (1 - ease((t - T_START) / .3)))
+    # the planets, drawn small: each its own face; lit toward the Sun while the light lasts, then dim
+    for n in PLANETS:
+        p = scr(t, geo(n, t))
+        if not (-40 < p[0] < Wt + 40 and -40 < p[1] < 1120): continue
+        pa = ease((t - T_START - .2) / .4)
+        L = lit(n, t)
+        planet_art(c, p, n, L, sun, pa)
+        c.text(p[0] + 16, p[1] - 16, GLY[n], 'seguisym.ttf', 13, WARM, (120 + 120 * L) * pa)
+        if RELEASE[n] <= t < RELEASE[n] + .5:                      # released: a small ring of light where it was let go
+            k = (t - RELEASE[n]) / .5
+            c.line(ring_pts(p, 8 + 30 * k, n=30), (255, 244, 220), 220 * (1 - k), .8)
+    # the Moon
+    mp = scr(t, geo('Luna', t)); ml = lit('Luna', t)
+    planet_art(c, mp, 'Luna', ml, sun, ma)
+    # me: the gap ring, smaller as the circles come off it; the light on me goes when the news reaches me
+    Rr = lerp(.22 * KPX0, 30., m)
+    my_light = 1. if t < RELEASE['Terra'] else 1 - .55 * ease((t - RELEASE['Terra']) / .4)
+    gap = 27.
+    pts = ring_pts(C0, Rr, gap, n=120)
+    c.line(pts, (255, 248, 236), 255 * my_light, 2.6 * lerp(1., .55, m))
+    if t < RELEASE['Terra']:                                       # the side of me facing you is lit
+        sa_ = math.degrees(math.atan2(sun[0] - C0[0], -(sun[1] - C0[1])))
+        arc = ring_pts(C0, Rr + 2, a0=sa_ - 50, a1=sa_ + 50, n=30)
+        c.line(arc, (255, 236, 200), 120 * ease((t - T_START) / .5), 1.6)
+    if t < T_START + .5:                                            # s08c's flat heartbeat inside, fading
+        c.line([(C0[0] - Rr * .86, C0[1]), (C0[0] + Rr * .86, C0[1])], GREEN, 240 * (1 - ease((t - T_START) / .4)), 1.6)
+    # the hand: from me to you; it follows the empty place until the news reaches me, then hangs where it last pointed
+    hand_t = min(t, RELEASE['Terra'])
+    hs = scr(hand_t, geo('Sol', hand_t)); hs = (hs[0] - cen(hand_t)[0] + C0[0], hs[1] - cen(hand_t)[1] + C0[1])
+    hcd = math.degrees(math.atan2(hs[0] - C0[0], -(hs[1] - C0[1])))
+    hcd = lerp(0., hcd, m) if m < 1 else hcd
+    L_ = lerp(.54 * KPX0, A['Terra'] * PX - 16, m)
+    ha = 1 - ease((t - RELEASE['Terra'] - .4) / .8)
+    if ha > 0:
+        ang = S8.clock(hcd)
+        dirv = (math.cos(ang), -math.sin(ang))
+        tip = (C0[0] + dirv[0] * L_, C0[1] + dirv[1] * L_)
+        base = (C0[0] + dirv[0] * Rr, C0[1] + dirv[1] * Rr)
+        c.line([base, tip], (255, 248, 236), 230 * ha, 1.4)
+        rc = (C0[0] + dirv[0] * L_ * .66, C0[1] + dirv[1] * L_ * .66)
+        c.line(ring_pts(rc, 6, 30, n=24), (255, 248, 236), 230 * ha, 1.)
+        c.dot(*C0, 3, (255, 248, 236), 230 * ha)
+
+    draw_panel(c, t)
+    draw_text(c, t)
+    out = c.result()
+    if t > 117.55:                                                   # it was an eyepiece: the field closes to a round
+        from PIL import ImageDraw as _D, ImageFilter as _F
+        u = ease((t - 117.55) / .7); r = lerp(1150., 470., u) * h / 1080; cx, cy = 960 * w / 1920, 500 * h / 1080
+        m = Image.new('L', (w, h), 0); _D.Draw(m).ellipse((cx - r, cy - r, cx + r, cy + r), fill=255)
+        m = m.filter(_F.GaussianBlur(6 * h / 1080))
+        out = Image.composite(out, Image.new('RGB', (w, h), (0, 0, 0)), m)
+        _D.Draw(out).ellipse((cx - r, cy - r, cx + r, cy + r), outline=(70, 56, 38), width=max(1, int(3 * h / 1080)))
+    if t < T_START + .15:                                            # in from s08c's own last frame
+        k = ease((t - T_START) / .15)
+        out = Image.blend(S8.draw(t, w, h), out, k)
+    return out
+
+
+# ============================================================ the instrument and the legend
+def draw_panel(c, t):
+    """s08c's oscilloscope, now: each body's distance from me (Tycho's frame) against time"""
+    Wt = c.Wt
+    X0, Y0, X1, Y1 = 120, 884, Wt - 120, 1032
+    TX0, TX1 = X0 + 70, X1 - 290
+    # the panel is solid: the simulation passes under it
+    c.d.rectangle([X0 * c.k, Y0 * c.k, X1 * c.k, Y1 * c.k], fill=(0, 0, 0, 255))
+    c.line([(X0, Y0), (X1, Y0), (X1, Y1), (X0, Y1), (X0, Y0)], DIM, 140, .9)
+    c.line([(TX1 + 20, Y0), (TX1 + 20, Y1)], DIM, 110, .7)
+    for i in range(11):
+        x = TX0 + (TX1 - TX0) * i / 10
+        for y in range(int(Y0 + 8), int(Y1 - 6), 6): c.dot(x, y, .7, DIM, 90)
+    for j in range(5):
+        y = Y0 + 8 + (Y1 - Y0 - 16) * j / 4
+        for x in range(int(TX0), int(TX1), 6): c.dot(x, y, .7, DIM, 70)
+    ta, tb = T_START - .3, T_END + .2
+    X = lambda tt: TX0 + (TX1 - TX0) * (tt - ta) / (tb - ta)
+    Y = lambda r: Y1 - 10 - (Y1 - Y0 - 20) * clamp(r / 4.2, 0, 1.08)
+    nm = ['Sol'] + PLANETS
+    for j, n in enumerate(nm):
+        pts = []
+        tt = ta
+        while tt <= t:
+            g = geo(n, tt); r = math.hypot(*g)
+            if r < 4.6: pts.append((X(tt), Y(r)))
+            tt += .02
+        col = (255, 236, 200) if n == 'Sol' else GOLD
+        if len(pts) > 1: c.line(pts, col, 210 if n == 'Sol' else 170, 1.)
+        if pts and pts[-1][1] > Y0 + 6: c.text(pts[-1][0] + 8, pts[-1][1] - 2, GLY[n], 'seguisym.ttf', 9, col, 200, anchor='lm')
+    c.text(X0 + 12, Y0 + 18, 'r(t)', 'CascadiaMono.ttf', 9, WARM, 190, anchor='lm')
+    c.text(X0 + 12, Y0 + 36, 'a Terra', 'GARAIT.TTF', 10, WARM, 160, anchor='lm')
+    c.text(TX1 - 4, Y0 + 14, '0.5 s/div', 'CascadiaMono.ttf', 9, DIM, 200, anchor='rm')
+    for n, tr in RELEASE.items():                                   # when each was let go
+        if t >= tr:
+            x = X(tr); c.line([(x, Y0 + 4), (x, Y1 - 4)], GREEN if n == 'Terra' else DIM, 140, .6)
+            c.text(x, Y1 - 10, GLY[n], 'seguisym.ttf', 8, GREEN if n == 'Terra' else WARM, 180)
+    if t >= T0:
+        x = X(T0); c.line([(x, Y0 + 4), (x, Y1 - 4)], (255, 244, 220), 200, .9)
+        c.text(x + 4, Y0 + 14, 'sol.remove()', 'CascadiaMono.ttf', 8, GREEN, 200, anchor='lm')
+    # the right-hand window: the light still on its way, as a growing circle about the empty place, to scale
+    sx0, sx1, sy0, sy1 = TX1 + 40, X1 - 16, Y0 + 26, Y1 - 10
+    c.text(sx0, Y0 + 14, 'lux in itinere', 'GARAIT.TTF', 10, WARM, 180, anchor='lm')
+    cx, cy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
+    for n in PLANETS + ['Terra']:
+        rr = A[n] * 18
+        c.line(ring_pts((cx, cy), rr, n=48), GREEN if n == 'Terra' else DIM, 120, .6)
+    if t >= T0:
+        fr = min(C * (t - T0), 2.6) * 18
+        c.line(ring_pts((cx, cy), fr, n=48), (255, 244, 220), 220, 1.)
+    c.dot(cx, cy, 2, (255, 250, 238) if t < T0 else DIM, 220)
+
+
+ROWS = [('Terra', 'Terra · Ego'), ('Sol', 'Sol · Tu'), ('Luna', 'Luna'), ('Mercurius', 'Mercurius'), ('Venus', 'Venus'),
+        ('Mars', 'Mars'), ('Iuppiter', 'Iuppiter'), ('Saturnus', 'Saturnus')]
+
+
+def status(n, t):
+    if t < T0: return 'fixed' if n == 'Terra' else 'orbit'
+    if n == 'Sol': return 'removed'
+    if n == 'Luna': return 'orbit · unlit' if lit('Luna', t) < .5 else 'orbit'
+    if n == 'Terra': return 'fixed · unlit' if t >= RELEASE['Terra'] else 'fixed'
+    if t >= RELEASE[n]: return f'released +{RELEASE[n] - T0:.2f}'
+    return 'orbit · ∅'
+
+
+def draw_text(c, t):
+    Wt = c.Wt
+    la = ease((t - T_START) / .3)
+    # the legend (s08c's TABULA, now Tycho's system with each body's state)
+    x, y = 90, 360
+    c.text(x, y - 40, 'SYSTEMA TYCHONICUM', 'GARA.TTF', 14, GOLD, 200 * la, anchor='lm')
+    c.text(x, y - 18, 'Tychonis Brahe, MDLXXXVIII', 'GARAIT.TTF', 10, GOLD, 150 * la, anchor='lm')
+    for i, (n, lab) in enumerate(ROWS):
+        yy = y + 14 + i * 27
+        st = status(n, t)
+        dark = st.startswith('released') or st == 'removed' or 'unlit' in st
+        c.text(x + 10, yy, GLY[n], 'seguisym.ttf', 15, WARM, (150 if dark else 255) * la)
+        c.text(x + 36, yy, lab, 'GARAIT.TTF', 15, WARM, (110 if dark else 200) * la, anchor='lm')
+        c.text(x + 330, yy, st, 'CascadiaMono.ttf', 9, GREEN if st.startswith('released') or n == 'Sol' and t >= T0 else DIM, 200 * la, anchor='rm')
+    # readouts (s08c's place, s08c's green)
+    if t >= T0:
+        rows = [('t − t₀', f'{t - T0:+6.2f} s'), ('lux  r', f'{C * (t - T0):6.2f}'), ('sol', '  null'),
+                ('terra', ' fixed' if t < RELEASE['Terra'] else 'fixed*')]
+    else:
+        rows = [('t − t₀', f'{t - T0:+6.2f} s'), ('lux  r', '     —'), ('sol', '  1.00'), ('terra', ' fixed')]
+    for i, (k, v) in enumerate(rows):
+        c.text(Wt - 90, 120 + i * 26, f'{k:<13}{v:>10}', 'CascadiaMono.ttf', 12, GREEN, 150 * la, anchor='rm')
+    if t >= RELEASE['Terra'] + .2:
+        c.text(Wt - 90, 236, '* by axiom', 'GARAIT.TTF', 11, GREEN, 150 * ease((t - RELEASE['Terra'] - .2) / .3), anchor='rm')
+    # the command, typed where s08c's lines were
+    def typed(s, t0, x, y, col=GREEN, sz=11):
+        n = int(clamp((t - t0) / .22) * len(s))
+        if n > 0: c.text(x, y, s[:n], 'CascadiaMono.ttf', sz, col, 220, anchor='rm')
+    typed('> sim.remove(sol)', T_CMD, Wt - 90, 280)
+    if T_CMD + .25 <= t < T0 and (t * 2.4) % 1 < .55: c.text(Wt - 84, 280, '▌', 'CascadiaMono.ttf', 11, GREEN, 220, anchor='lm')
+    if T0 <= t < T0 + .35: c.text(Wt - 90, 280, '> sim.remove(sol)', 'CascadiaMono.ttf', 11, (255, 255, 255), 255 * (1 - (t - T0) / .35), anchor='rm')
+    typed('> sim.close()', T_ISO + .45, Wt - 90, 306)
+    if t >= T_ISO + .75: c.text(Wt - 90, 330, 'no object', 'CascadiaMono.ttf', 11, DIM, 220, anchor='rm')
+    # the caption
+    cap = 'SYSTEMA TYCHONICUM' if t < T0 else ('SOL SUBLATUS' if t < T_ISO else 'SOLITUDO')
+    cap_args = (cap, 13 if t < T_ISO else 16)
+    # (the caption is drawn last, in its cartouche)
+    # the frame: an engraved border — double rule, a band of dentils, rosettes in the corners, lozenges mid-side.
+    # It is solid too: the band (outside the inner rule) covers whatever flies out under it
+    fa = 1.                                       # s08c already has this border: it is there from the first frame
+    k_ = c.k
+    for box in ((0, 0, Wt, 54), (0, 1080 - 54, Wt, 1080), (0, 0, 54, 1080), (Wt - 54, 0, Wt, 1080)):
+        c.d.rectangle([box[0] * k_, box[1] * k_, box[2] * k_, box[3] * k_], fill=(0, 0, 0, 255))
+    for inset, col, a_, wd in ((30, GOLD, 160, 1.5), (36, WARM, 70, .7), (54, GOLD, 120, .9)):
+        c.line([(inset, inset), (Wt - inset, inset), (Wt - inset, 1080 - inset), (inset, 1080 - inset), (inset, inset)], col, a_ * fa, wd)
+    for x in range(60, int(Wt) - 58, 12):
+        for y0 in (39, 1080 - 51):
+            c.line([(x, y0), (x, y0 + 12)], GOLD, 75 * fa, .6)
+    for y in range(60, 1080 - 58, 12):
+        for x0 in (39, Wt - 51):
+            c.line([(x0, y), (x0 + 12, y)], GOLD, 75 * fa, .6)
+    for cx_, cy_ in ((45, 45), (Wt - 45, 45), (45, 1035), (Wt - 45, 1035)):
+        c.line(ring_pts((cx_, cy_), 17, n=40), GOLD, 190 * fa, 1.2)
+        c.line(ring_pts((cx_, cy_), 11, n=30), WARM, 120 * fa, .7)
+        for q in range(8):
+            u = q * math.pi / 4
+            c.dot(cx_ + 14 * math.cos(u), cy_ + 14 * math.sin(u), 1.8, GOLD, 200 * fa)
+        c.dot(cx_, cy_, 3, GOLD, 220 * fa)
+    for mx, my in ((Wt / 2, 1035), (45, 540), (Wt - 45, 540)):
+        c.line([(mx - 14, my), (mx, my - 9), (mx + 14, my), (mx, my + 9), (mx - 14, my)], GOLD, 180 * fa, 1.)
+        c.dot(mx, my, 2.4, GOLD, 220 * fa)
+    # the caption in a cartouche with scrolled ends (it sits over the border)
+    cw_ = 190 if t < T_ISO else 150
+    k_ = c.k
+    c.d.rectangle([(Wt / 2 - cw_) * k_, 30 * k_, (Wt / 2 + cw_) * k_, 74 * k_], fill=(0, 0, 0, 255))
+    c.line([(Wt / 2 - cw_, 32), (Wt / 2 + cw_, 32), (Wt / 2 + cw_, 74), (Wt / 2 - cw_, 74), (Wt / 2 - cw_, 32)], GOLD, 190 * fa, 1.)
+    for sgn in (-1, 1):
+        x0 = Wt / 2 + sgn * cw_
+        spiral = [(x0 + sgn * (6 + 9 * (1 - u / 12)) * math.cos(u * .9) * (1 - u / 14), 53 + 9 * (1 - u / 12) * math.sin(u * .9)) for u in range(13)]
+        c.line(spiral, GOLD, 180 * fa, 1.)
+    c.text(Wt / 2, 53, cap_args[0], 'GARA.TTF', cap_args[1], GOLD, 210 * la)
+
+
+
+def textures(t, w, h): return {'u_img': draw(t, w, h)}

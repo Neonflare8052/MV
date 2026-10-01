@@ -1,0 +1,42 @@
+{
+  "max_ballistic_velocity_error": 5.711555672860413e-10,
+  "horizontal_speed_range": [
+    2.4734762900635587,
+    2.4734762900724405
+  ],
+  "edge_release_velocity_error": 0.000249999960243011,
+  "screen_x_minimum_frame_step": 1.588257418916328e-07,
+  "screen_bounds_px": [
+    [
+      752.375921127484,
+      367.0152757785909
+    ],
+    [
+      1369.1514724517656,
+      708.4405165827286
+    ]
+  ],
+  "pre_transition_pixel_differences": [
+    0,
+    0,
+    0
+  ],
+  "gpu_minimum_captured_plane_gap": 0.1496105223767216,
+  "gpu_minimum_forward_step": 0.040904998779296875,
+  "gpu_captured_particle_count": 7432,
+  "gpu_escaped_particle_count": 10488,
+  "gpu_maximum_boundary_activation_displacement": 0.0023627716582268476,
+  "checks": {
+    "unforced_horizontal_velocity_conserved": true,
+    "same_gravity_as_contact_scene": true,
+    "edge_release_continuous": true,
+    "camera_does_not_pull_ball_backwards": true,
+    "ball_visible": true,
+    "prior_shot_pixels_unchanged": true,
+    "gpu_particles_keep_forward_motion": true,
+    "gpu_captured_particles_remain_before_plane": true,
+    "gpu_boundary_does_not_teleport_points": true,
+    "gpu_both_escaping_and_captured_populations": true
+  },
+  "passed": true
+}

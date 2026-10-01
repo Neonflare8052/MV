@@ -1,0 +1,264 @@
+"""s02 · 0:16–0:29.709  interlude, world.execute(me);  — abstract, beat-driven, five set-ups (one per phrase).
+A execute: a scan line runs down the dark, one block of the world per beat, the points drop into place ·
+B low: skimming the new world, every beat sends a wave across it · C long lens head-on: the rows stack into waveforms ·
+D overhead: square fronts close in on the centre, beat by beat · E the world spins and collapses into one point;
+one white dot remains (you)."""
+import math, random
+from pathlib import Path
+from PIL import Image
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec3 u_cam, u_look; uniform float u_fov, u_focus, u_aper, u_roll;
+uniform float u_wt[8], u_wa[8]; uniform vec2 u_wd[8];   // active waves: age, amplitude, direction
+uniform float u_rev, u_scan, u_scanA;                   // A: revealed front (z), scan line
+uniform float u_amp;                                    // wave amplitude
+uniform float u_ridge;                                  // row lines
+uniform float u_sq[6], u_sqA[6];                        // D: square fronts (half size), strength
+uniform float u_scale, u_spin, u_col;                   // E: collapse
+uniform float u_dot, u_fieldA, u_hit, u_gain, u_labels, u_env[4];
+uniform sampler2D u_glyphs;
+out vec4 fragColor;
+#define PI 3.14159265
+const float C=.08, RL=6.;
+const vec3 WHITE=vec3(.92,.91,.88), COP=vec3(1.,.58,.28);
+float PXW;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float blurAt(float t){ return u_aper*abs(t-u_focus)/max(u_focus,.05); }
+float SC;   // world units per field unit (collapse)
+float glyph(float g, vec2 f, float lod){
+  if(g<.5||f.x<0.||f.x>1.||f.y<0.||f.y>1.) return 0.;
+  return textureLod(u_glyphs,vec2((g+clamp(f.x,.02,.98))/42.,clamp(f.y,.02,.98)),lod).r;
+}
+vec3 RT,UP;
+
+// height of the field at grid position q; returns crest (wave) in .y
+vec2 height(vec2 q){
+  float h=.07*(vn(q*.55)-.5)+.03*(vn(q*1.6+3.)-.5);
+  float cr=0.;
+  for(int i=0;i<8;i++){
+    float dt=u_wt[i]; if(dt<0.) continue;
+    float x=dot(q,u_wd[i])-(-7.+5.5*dt);
+    float w=exp(-x*x*2.2)*exp(-dt*.55)*u_wa[i];
+    h+=u_amp*.3*w; cr+=w;
+  }
+  // A: points still falling into place behind the scan
+  float fall=clamp((u_rev-q.y)/1.2,0.,1.);
+  h+=(1.-fall)*(1.-fall)*.8;
+  return vec2(h,cr);
+}
+float alive(vec2 q){ return step(q.y,u_rev)*step(max(abs(q.x),abs(q.y)),RL); }
+
+vec3 field(vec3 ro, vec3 rd, float tmax){
+  // into field space: undo spin and scale (rigid + uniform, so t is unchanged)
+  float cs=cos(-u_spin), sn=sin(-u_spin);
+  vec3 o=ro, d=rd;
+  o.xz=mat2(cs,-sn,sn,cs)*o.xz; d.xz=mat2(cs,-sn,sn,cs)*d.xz;
+  o/=SC; d/=SC;
+  vec3 bmin=vec3(-RL,-.25,-RL), bmax=vec3(RL,1.1,RL);
+  vec3 ird=1./d;
+  vec3 ta=(bmin-o)*ird, tb=(bmax-o)*ird, tn=min(ta,tb), tf=max(ta,tb);
+  float t0=max(max(tn.x,tn.y),max(tn.z,0.)), t1=min(min(tf.x,tf.y),min(tf.z,tmax));
+  if(t0>=t1) return vec3(0.);
+  vec2 dx=d.xz; dx=vec2(abs(dx.x)<1e-6?1e-6:dx.x,abs(dx.y)<1e-6?1e-6:dx.y);
+  vec3 p=o+d*(t0+1e-4);
+  vec2 cell=floor(p.xz/C), st=sign(dx), dl=abs(C/dx);
+  vec2 nx=((cell+max(st,0.))*C-o.xz)/dx;
+  float tc=t0;
+  vec3 acc=vec3(0.);
+  float dd=dot(d,d);
+  for(int i=0;i<240;i++){
+    if(tc>t1) break;
+    vec2 q=(cell+.5)*C;
+    float al=alive(q);
+    float dist_=vn(q*.33+7.);
+    if(al>0.&&h12(cell+2.)>.35*(1.-dist_)){
+      vec2 hc=height(q);
+      vec3 pos=vec3(q.x,hc.x,q.y);
+      float hp=h12(cell);
+      float m=max(abs(q.x),abs(q.y)), FR=0.;
+      for(int k=0;k<6;k++) FR+=exp(-pow((m-u_sq[k])*7.,2.))*u_sqA[k];
+      // point
+      float tt=dot(pos-o,d)/dd;
+      if(tt>0.&&tt<tmax){
+        float dist=length(o+d*tt-pos)*SC;
+        float R=.006*SC+blurAt(tt)+PXW*tt*.8;
+        float e=(.25+.75*hp*hp)*(1.+2.5*hc.y)*(.35+1.3*dist_*dist_);
+        vec3 c=mix(WHITE,COP,clamp(hc.y*1.2,0.,1.)*step(.4,hp));
+        if(hp>.93) c=COP;
+        e+=FR*4.; c=mix(c,COP,clamp(FR,0.,1.)*.7);
+        // A: scan line, and the block it just executed
+        e+=u_scanA*6.*exp(-pow((q.y-u_scan)*9.,2.))+u_scanA*2.*exp(-max(u_rev-q.y,0.)*1.2);
+        acc+=c*e*(.006*.006*SC*SC)/(R*R)*exp(-dist*dist/(R*R)*2.)*exp(-tt*.09);
+      }
+      // data columns: a few points stand up and pump with the beat
+      if(hp>.988){
+        float env=u_env[int(h12(cell+11.)*3.99)];
+        vec3 top=pos+vec3(0.,(.08+.5*h12(cell+4.))*(.3+env),0.);
+        vec3 ba=top-pos, w=o-pos;
+        float bb=dot(ba,ba), rb=dot(d,ba), rw=dot(d,w), bw=dot(ba,w);
+        float sg=clamp((bw*dd-rw*rb)/max(bb*dd-rb*rb,1e-9),0.,1.);
+        float t=(sg*rb-rw)/dd;
+        if(t>0.&&t<tmax){
+          float dist=length(o+d*t-pos-ba*sg)*SC;
+          float r=.0022*SC, R=r+blurAt(t)+PXW*t*.8;
+          acc+=mix(COP,vec3(1.,.9,.8),sg*sg)*(r/R)*exp(-dist*dist/(R*R)*2.)*exp(-t*.09)*(1.+2.*env)*u_ridge;
+        }
+      }
+      // value labels (close shots)
+      if(u_labels>0.&&hp<.1&&tt>0.){
+        vec3 v=(o+d*tt-pos)*SC;
+        vec2 lq=vec2(dot(v,RT),dot(v,UP))-vec2(.014,-.008);
+        float gw=.0085, gh=.014;
+        if(lq.x>0.&&lq.x<gw*4.&&lq.y>0.&&lq.y<gh){
+          float ci=floor(lq.x/gw);
+          float gch=ci==1.?1.:27.+floor(h12(cell+ci*3.7+floor(u_time*9.+hp*40.)*.13)*10.);
+          float lod=max(log2((PXW*tt+blurAt(tt))/(gw/48.)),0.);
+          acc+=vec3(.8,.76,.7)*glyph(gch,vec2(fract(lq.x/gw),lq.y/gh),lod)*u_labels*.7*exp(-tt*.2);
+        }
+      }
+      // row lines: half segments to the x-neighbours
+      if(u_ridge>0.){
+        for(int s=-1;s<=1;s+=2){
+          vec2 q2=q+vec2(float(s)*C*.5,0.);
+          vec3 b=vec3(q2.x,height(q2).x,q2.y);
+          vec3 ba=b-pos, w=o-pos;
+          float bb=dot(ba,ba), rb=dot(d,ba), rw=dot(d,w), bw=dot(ba,w);
+          float sg=clamp((bw*dd-rw*rb)/max(bb*dd-rb*rb,1e-9),0.,1.);
+          float t=(sg*rb-rw)/dd;
+          if(t<=0.||t>tmax) continue;
+          float dist=length(o+d*t-pos-ba*sg)*SC;
+          float r=.0012*SC, R=r+blurAt(t)+PXW*t*.8;
+          acc+=mix(vec3(.5,.52,.56),COP,clamp(hc.y+FR,0.,1.))*u_ridge*(r/R)*exp(-dist*dist/(R*R)*2.)*exp(-t*.12)*(.5+1.6*hc.y+3.*FR)*(.4+dist_);
+        }
+      }
+    }
+    if(nx.x<nx.y){ tc=nx.x; nx.x+=dl.x; cell.x+=st.x; } else { tc=nx.y; nx.y+=dl.y; cell.y+=st.y; }
+  }
+  return acc;
+}
+// the scan line itself: a thin sheet of light standing across the field
+float scanSheet(vec3 ro, vec3 rd){
+  if(u_scanA<=0.) return 0.;
+  float t=(u_scan*SC-ro.z)/rd.z;
+  if(t<=0.) return 0.;
+  vec3 p=ro+rd*t;
+  if(abs(p.x)>RL*SC) return 0.;
+  return u_scanA*.5*exp(-abs(p.y)*40.)/max(abs(rd.z)*4.,.3);
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  uv=mat2(cos(u_roll),-sin(u_roll),sin(u_roll),cos(u_roll))*uv;
+  vec3 ro=u_cam, fw=normalize(u_look-ro), rt=normalize(cross(fw,vec3(0,1,0))), up=cross(rt,fw); RT=rt; UP=up;
+  float tf=tan(u_fov*.5);
+  vec3 rd=normalize(fw+(uv.x*rt+uv.y*up)*2.*tf);
+  PXW=2.*tf/u_res.y; SC=u_scale;
+  vec3 col=vec3(.004,.004,.005);
+  if(u_fieldA>0.) col+=field(ro,rd,60.)*u_fieldA*u_gain;
+  col+=vec3(.85,.92,1.)*scanSheet(ro,rd);
+  // the one that remains
+  vec3 toO=-ro; float to=dot(toO,rd);
+  float dO=length(toO-rd*to);
+  float R=.004+PXW*to*.8;
+  col+=vec3(1.)*u_dot*(.004*.004)/(R*R)*exp(-dO*dO/(R*R)*2.)*3.;
+  col+=vec3(1.)*u_hit*exp(-dO*dO/(to*to)*900.)*2.;
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.6, u_ca=.007, u_grain=.04)
+
+T0, T_B, T_C, T_D, T_E, T_HIT, T_END = 16.0, 19.708, 23.416, 25.27, 27.124, 28.444, 29.709
+BEATS = [15.97 + .4635 * n for n in range(32)]
+ACCENTS = {17.38: 1., 21.07: 1., 21.63: .9, 25.69: .8, 28.44: 1.}
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def inc(x): x = clamp(x); return x ** 3
+def mix(a, b, x):
+    if isinstance(a, tuple): return tuple(p + (q - p) * x for p, q in zip(a, b))
+    return a + (b - a) * x
+
+
+_rnd = random.Random(3)
+WDIR = []
+for n in range(len(BEATS)):
+    a = _rnd.uniform(-.6, .6) + (math.pi if n % 2 else 0.) + math.pi / 2     # mostly across the camera's travel
+    WDIR.append((math.cos(a), math.sin(a)))
+WAMP = [.55 + .45 * max((v for k, v in ACCENTS.items() if abs(k - b) < .12), default=0.) for b in BEATS]
+
+CUTS = [
+    [(T0, (0., 4.2, 6.2), (0., 0., -.8), 42, 7., .02, -6),                  # A: execute, three-quarter overhead
+     (T_B, (1.6, 3.6, 5.6), (0., 0., -.4), 42, 6.5, .02, 2)],
+    [(T_B, (-1.2, .32, 5.4), (-.9, .05, 3.6), 62, 1.8, .011, -4),          # B: low skim along -z
+     (T_C, (-.3, .36, -1.4), (.1, .02, -3.4), 62, 1.8, .011, 5)],
+    [(T_C, (0., 1.25, 10.), (0., .05, 0.), 22, 9., .03, 0),                 # C: long lens head-on, rows stack
+     (T_D, (0., 1.05, 9.2), (0., .05, 0.), 22, 8.3, .03, 0)],
+    [(T_D, (0., 6.2, .01), (0., 0., 0.), 52, 6.2, .02, 0),                  # D: straight down
+     (T_E, (0., 5.6, .01), (0., 0., 0.), 52, 5.6, .02, 35)],
+    [(T_E, (3.6, 4.4, 4.8), (0., 0., 0.), 44, 7.4, .02, 0),                 # E: collapse
+     (T_HIT, (2.6, 3.2, 3.5), (0., 0., 0.), 44, 5.4, .015, 0),
+     (T_END, (2.4, 3.0, 3.25), (0., 0., 0.), 44, 5., .0, 0)],
+]
+
+
+def camera(t):
+    keys = [c for c in CUTS if t >= c[0][0]][-1] if t >= CUTS[0][0][0] else CUTS[0]
+    if t <= keys[0][0]: return list(keys[0][1:])
+    for a, b in zip(keys, keys[1:]):
+        if t < b[0] or b is keys[-1]:
+            x = ease((t - a[0]) / (b[0] - a[0]))
+            return [mix(u, v, x) for u, v in zip(a[1:], b[1:])]
+
+
+def params(t):
+    cam, look, fov, focus, aper, roll = camera(t)
+    # waves: only from B on; the last eight beats
+    act = [(t - b, WAMP[n], WDIR[n]) for n, b in enumerate(BEATS) if b <= t and t - b < 3.5 and b >= T_B - .05]
+    act = act[-8:]
+    act += [(-1., 0., (1., 0.))] * (8 - len(act))
+    # A: one block of rows per beat
+    nb = sum(1 for b in BEATS if T0 - .05 <= b <= t)
+    if t < T_B:
+        front = -6. + 1.6 * nb + .25 * outc((t - max([b for b in BEATS if b <= t] or [T0])) / .2)
+        scan = front
+        scanA = 1. - ease((t - T_B + .5) / .5)
+    else:
+        front, scan, scanA = 99., 99., 0.
+    # D: square fronts launched on each beat, closing on the centre
+    sq, sqA = [], []
+    for b in [b for b in BEATS if T_D - .05 <= b <= t][-6:]:
+        a = t - b
+        sq.append(6.2 - 4.2 * a); sqA.append(math.exp(-a * .6) * (1. if t < T_E + .3 else 1 - ease((t - T_E - .3) / .4)))
+    sq += [99.] * (6 - len(sq)); sqA += [0.] * (6 - len(sqA))
+    # E: spin and collapse
+    x = clamp((t - T_E) / (T_HIT - T_E))
+    scale = 1. - .72 * inc(x) if t < T_HIT else .28 * (1 - outc((t - T_HIT) / .14))
+    spin = 2.2 * inc(x) ** .8 + (0. if t < T_HIT else 1.2 * outc((t - T_HIT) / .14))
+    hit = math.exp(-(t - T_HIT) * 9) if t >= T_HIT else 0.
+    return dict(
+        u_cam=cam, u_look=look, u_fov=math.radians(fov), u_focus=focus, u_aper=aper, u_roll=math.radians(roll),
+        u_wt=[a[0] for a in act], u_wa=[a[1] for a in act], u_wd=[a[2] for a in act],
+        u_rev=front, u_scan=scan, u_scanA=scanA if t >= T0 else 0.,
+        u_amp=ease((t - T_B + .2) / .6) * (1 - .6 * ease((t - T_D) / .8)),
+        u_ridge=ease((t - T0 - .5) / 1.5) * (1. - .5 * ease((t - T_D) / .5)),
+        u_sq=sq, u_sqA=sqA,
+        u_scale=max(scale, 1e-4), u_spin=spin, u_col=x,
+        u_fieldA=1. if t < T_HIT + .14 else 0.,
+        u_dot=ease((t - T_HIT - .05) / .15), u_hit=hit,
+        u_gain=[1.8, 1., 1.25, 2.2, 1.9][[i for i, c in enumerate(CUTS) if t >= c[0][0]][-1] if t >= T0 else 0],
+        u_labels=1. if T_B <= t < T_C else 0.,
+        u_env=[max([math.exp(-(t - b) * 5) for n, b in enumerate(BEATS) if b <= t and n % 4 in ks] or [0.]) for ks in ((0, 2), (1, 3), (0,), (2, 3))],
+    )
+
+
+GLYPHS = Path(__file__).resolve().parents[2] / 'tests' / 't06_teletype' / 'glyphs.png'
+_T = {}
+
+
+def textures(t, w, h):
+    if not _T: _T['g'] = Image.open(GLYPHS)
+    return {'u_glyphs': _T['g']}

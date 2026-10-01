@@ -1,0 +1,671 @@
+"""s14e (desk) · 2:46.016–2:54.975  the Chinese Room's desk, seen from above, under the eye.  (v7)
+The operator is the machine's eye: a gapped ring, a red pupil of frosted glass, drawn in the shader.  It hangs over
+what it looks at; its light falls from it; the brackets < > appear only when it compares.  Each move: it accelerates,
+smears (real motion blur, one or two frames), and lands in held steps.  Everything else moves continuously.
+
+2:46.016 Then I can           carried over from s14d, it settles over the envelope.
+2:46.47 … 2:48.33 be your only   Turing's papers fall round it; it looks at each as it lands.
+2:48.911 EXECUTION            beside the seal as the wax is pressed.
+2:49.824 If I can have you back   it draws back; the letter unfolds under its light.
+2:51.868 I will run the       it reads the letter a line a step, bracketing each; the letter turns over: 爱.
+2:52.49 / 2:52.712 EXECUTION  it winds up to the right, then whips across the desk, red; the papers go.
+2:52.96 … 2:53.42             the letter drawn aside; the rule book, which lay under the papers, opens.
+2:53.643 Though we are trapped   row by row, <row>; one page turned; it locks on <爱> → see shelf C, no. 3.
+2:54.348                      to shelf C, file C-3; back with it; its detail unrolls (M.U.C.).
+2:54.66 … 2:54.811            your pointer comes in: the eye turns to it, and brackets it.
+
+Legible words are verified originals (see papers.py); the rest is typesetting texture."""
+import sys, math, random, importlib.util
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter
+
+_D = Path(__file__).resolve().parent
+def _load(name, file):
+    sp = importlib.util.spec_from_file_location(name, _D / file); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m
+S14E = _load('s14e_l', 's14e_letter.py')
+G = _load('s14g_d', 's14g_plan.py')
+PAP = _load('papers_d', 'papers.py')
+FG = _load('figures_d', 'figures.py')
+AN = _load('anim_d', 'anim.py')
+
+T_CUT, T_HIT, T_BACK, T_RUN, T_X = 166.016, 168.911, 169.824, 171.868, 172.712
+LAND = S14E.LAND
+LAY = S14E.LAY
+T_SET, T_BOOK, TD, FLIP, T_REACH, T_LAY, T_SQ = 172.957, 173.421, 173.643, 173.884, 174.348, 174.62, 174.975
+CLICKS = (174.69, 174.811)
+POST = dict(u_bloom=0., u_ca=0., u_grain=.012)
+
+S0 = 875. / .297                               # px per metre (1080 units) with the camera at 1: the letter as it was
+K = S0 / 1080.                                 # units (screen heights) per metre
+LETC = (1.72, 1.45)                            # where the envelope and the letter lie (world metres, y toward him)
+LET1 = G.LET1                                  # where the letter is set down, left of the book
+CAM2, Z2 = G.CAM2, G.S2 / S0
+CAM3, Z3 = G.CAM3, G.S3 / S0
+LAMP = (1.80, .70)                             # (shader constant; the shadows follow the eye's light)
+LAMP3 = (1.40, 1.00, .55)
+SHELF = (2.64, .98, 3.0, 1.92)
+FOLD0 = ((SHELF[0] + SHELF[2]) / 2, SHELF[1] + .022 + 2.5 * (SHELF[3] - SHELF[1] - .022) / 6 - .006)
+FOLD1 = (2.3, 1.5)
+POOL = (1.80, 1.38)
+BEAT = lambda n: 162.76 + n * .4635
+FR = 1 / 60.
+HIDE_POINTER = False                           # s15 draws the pointer itself over the captured last frame
+HIDE_EYE = False                               # s15 draws the eye itself: it is not part of the picture it is shoved out of
+EYE0 = (960., 290.)                            # where s14d leaves the eye (1080 units)
+
+
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+def lerp2(a, b, k): return (lerp(a[0], b[0], k), lerp(a[1], b[1], k))
+def q2w(q): return (LETC[0] + q[0] / K, LETC[1] - q[1] / K)       # letter space (units, y up) -> world
+def w2q(w): return ((w[0] - LETC[0]) * K, -(w[1] - LETC[1]) * K)
+
+
+# ---------------- the camera: continuous — a slow drift, a slow push
+def cam_base(t):
+    if t < 172.92: return LETC, 1.
+    if t < T_REACH:
+        e = ease((t - 172.92) / .3)
+        return lerp2(LETC, CAM2, e), math.exp(lerp(0., math.log(Z2), e))
+    e = ease((t - T_REACH) / .16)
+    return lerp2(CAM2, CAM3, e), math.exp(lerp(math.log(Z2), math.log(Z3), e))
+
+
+def cam(t):
+    c, z = cam_base(t)
+    u = t - T_CUT
+    z *= 1 + .018 * u / 9.
+    d = .006 / z ** .5
+    return (c[0] + d * math.sin(u * .55 + .3), c[1] + d * .7 * math.sin(u * .41 + 1.7)), z
+
+
+def to_screen(p, t, w=1920, h=1080):
+    c, z = cam(t)
+    Wt = w * 1080 / h
+    return (Wt / 2 + (p[0] - c[0]) * S0 * z, 540 + (p[1] - c[1]) * S0 * z)
+
+
+def to_world(s, t):
+    c, z = cam(t)
+    return (c[0] + (s[0] - 960) / (S0 * z), c[1] + (s[1] - 540) / (S0 * z))
+
+
+# ---------------- the letter (continuous)
+SCAN0, SCAN1 = T_RUN, T_RUN + 4 * AN.HOLD * FR
+
+
+def letter_state(t):
+    lift = .025 * ease((t - (SCAN1 - .02)) / .1) * (1 - ease((t - (SCAN1 + .36)) / .12))
+    flip = ease((t - SCAN1) / .34)
+    pos = lerp2(LETC, LET1, outc((t - (T_SET - .03)) / .24))
+    return pos, 1. + lift, flip, lift / .025
+
+
+# ---------------- the eye's track
+def _row(side, i):
+    bx, by = G.BOOK_C; pw, ph = G.PG
+    x0 = bx - pw + side * pw + .026
+    y0 = by - ph / 2 + G.ROW0 + i * G.ROWH + .002
+    return (x0, y0, x0 + .09, y0 + G.ROWH - .006)
+
+
+def _over_row(side, i):
+    x0, y0, x1, y1 = _row(side, i)
+    return ((x0 + x1) / 2 - .01, y0 - .045)
+
+
+PAPER_W = [q2w(c) for c, _ in LAY]
+DOT = q2w((0., -.03))
+W0 = BEAT(21)
+STEPF = AN.HOLD * FR                           # one held step
+LINES = [LETC[1] - .12 + .08 * j for j in range(4)]           # the letter's lines it reads, a step each
+ROWS = [(TD, 0, 0), (TD + STEPF, 0, 4), (TD + 2 * STEPF, 0, 8), (173.93, 1, 0), (173.93 + STEPF, 1, 2), (173.93 + 2 * STEPF, 1, 3),
+        (173.93 + 3 * STEPF, 1, 4)]
+T_LOCK = ROWS[-1][0] + .02
+
+
+def _track():
+    sac = lambda t0, to, n=3: AN.move(t0, to, 'sac', n)
+    tr = [AN.move(0., to_world(EYE0, T_CUT), 'set'), sac(T_CUT + .1, (LETC[0], LETC[1] - .05))]
+    for tl, pw_ in zip(LAND, PAPER_W):
+        tr.append(sac(tl - .05, (pw_[0], pw_[1] - .03)))
+    tr += [sac(BEAT(12) + .1, (LETC[0], LETC[1] - .05)),
+           sac(BEAT(13) + .05, (DOT[0] + .07, DOT[1] - .07)),
+           sac(T_BACK + .05, (LETC[0], LETC[1] - .17))]
+    for j, y in enumerate(LINES): tr.append(AN.move(SCAN0 + j * STEPF, (LETC[0], y - .05), 'hop'))
+    tr += [sac(SCAN1 + .02, (LETC[0] + .16, LETC[1] - .13)),
+           sac(W0, (2.0, LETC[1] - .02)),
+           sac(T_X - .05, (1.47, LETC[1] - .02), 5),                          # the whip: a long smear; it lands inside the frame
+           sac(T_SET + .02, (LET1[0], LET1[1] - .08)),
+           sac(BEAT(23) - .12, (G.BOOK_C[0], G.BOOK_C[1] - .1))]
+    for (tr_, side, i) in ROWS: tr.append(AN.move(tr_, _over_row(side, i), 'hop'))
+    tr += [sac(T_REACH, (FOLD0[0], FOLD0[1] - .05)), sac(T_REACH + .16, (FOLD1[0], FOLD1[1] - .07))]
+    return tr
+
+
+EYE_T = _track()
+
+
+def red_at(t):
+    if t < W0: return 0.
+    if t < T_X - .05: return .5 * ease((t - W0) / .1)
+    if t < T_X + .2: return 1.
+    return 1. - ease((t - T_X - .2) / .25)
+
+
+def rad_at(t):
+    """the light's radius"""
+    if t < BEAT(13): return .36
+    if t < T_BACK: return .16
+    if t < T_RUN: return .5
+    if t < SCAN1: return .22
+    if t < W0: return .3
+    if t < T_X + .3: return .12
+    if t < TD: return .36
+    if t < T_REACH: return .2
+    return .3
+
+
+def spot_at(t):
+    if BEAT(13) + .05 <= t < T_BACK + .05: return DOT
+    p = AN.smooth(EYE_T, t)
+    return (p[0], p[1] + .045)
+
+
+def gaze(t):
+    return spot_at(t), rad_at(t), 2., red_at(t)
+
+
+PTR_IN, PTR_GO, PTR_AT = 173.90, 174.46, 174.63
+
+
+def _minjerk(u):
+    u = clamp(u); return u * u * u * (10 - 15 * u + 6 * u * u)
+
+
+def pointer_xy(t, w=1920, h=1080):
+    """your pointer: smooth, human.  It is in the corner a while (a hand resting on a mouse), then goes: fast, slowing,
+    a little past, corrected — and rests on the detail"""
+    Wt = w * 1080 / h
+    home = (Wt - 150, 930)
+    tgt = (Wt * .5 - 470, 300)
+    if t < PTR_GO:
+        u = t - PTR_IN
+        return home[0] + 3 * math.sin(u * 2.3) + 1.5 * math.sin(u * 7.1), home[1] + 2 * math.sin(u * 1.7 + 1) + 1.2 * math.sin(u * 5.3)
+    k = _minjerk((t - PTR_GO) / (PTR_AT - PTR_GO))
+    bow = math.sin(k * math.pi) * 36                                  # a hand's path bows a little
+    x = lerp(home[0], tgt[0] + 14, k) + bow * .5
+    y = lerp(home[1], tgt[1] - 9, k) + bow
+    c = _minjerk((t - PTR_AT + .01) / .06)                            # the correction onto the mark
+    return x - 14 * c, y + 9 * c
+
+
+def brackets_at(tf):
+    """what it is comparing (world box, or screen box for your pointer), and since when (for the snap)"""
+    if SCAN0 <= tf < SCAN1 + .02:
+        j = min(3, int((tf - SCAN0) / STEPF))
+        y = LINES[j]
+        return ('w', (LETC[0] - .1, y - .012, LETC[0] + .1, y + .012)), tf - (SCAN0 + j * STEPF)
+    if TD <= tf < T_REACH and not (FLIP - .03 <= tf < ROWS[3][0]):
+        cur = ROWS[0]
+        for rw in ROWS:
+            if tf >= rw[0]: cur = rw
+        x0, y0, x1, y1 = _row(cur[1], cur[2])
+        if tf >= T_LOCK:                                             # locked on 爱: the brackets close in
+            k = _lock(tf - T_LOCK)[0]
+            cx = x0 + .012
+            return ('w', (lerp(x0, cx - .012, k), y0, lerp(x1, cx + .014, k), y1)), tf - cur[0]
+        return ('w', (x0, y0, x1, y1)), tf - cur[0]
+    if tf >= CLICKS[1]:
+        px, py = pointer_xy(tf)
+        return ('s', (px - 12, py - 6, px + 30, py + 36)), tf - CLICKS[1]
+    return None, 9.
+
+
+def _snap(age):
+    """bracket scale by age since they appeared, and whether that frame is held"""
+    A, S = 2 * FR, 1 * FR
+    if age < A: return 2.2 - .2 * (age / A) ** 2, False
+    if age < A + S: return lerp(2.0, 1.15, (age - A) / S), False
+    return (1.06, 1.)[min(1, int((age - A - S) / STEPF))], True
+
+
+def _lock(age):
+    """0 .. 1 closing on 爱, the same way"""
+    A, S = 2 * FR, 1 * FR
+    if age < 0: return 0., True
+    if age < A: return .1 * (age / A) ** 2, False
+    if age < A + S: return lerp(.1, .9, (age - A) / S), False
+    return (1.04, 1.)[min(1, int((age - A - S) / STEPF))], True
+
+
+def pupil_at(tf):
+    if tf >= T_LOCK and tf < T_REACH: return (1., .75, .58)[min(2, int((tf - T_LOCK) / STEPF))]
+    return 1.
+
+
+def look_at(tf, pos):
+    """where the gap points: at the next place, a few frames before it goes; while moving, along the way; at the
+    end, your pointer"""
+    if tf >= 174.66 or 174.26 <= tf < 174.33:
+        px, py = pointer_xy(tf)
+        s = to_screen(pos, tf)
+        return math.atan2(py - s[1], px - s[0])
+    nm = AN.next_move(EYE_T, tf, .07)
+    m, a = AN._active(EYE_T, tf)
+    tgt = nm['to'] if nm else m['to']
+    src = pos if nm else a
+    dx, dy = tgt[0] - src[0], tgt[1] - src[1]
+    if math.hypot(dx, dy) < 1e-4: return math.pi / 2
+    return math.atan2(dy, dx)
+
+
+def eye_uniforms(ts):
+    """the eye for one sub-frame: its state at both ends of its slice of the exposure"""
+    tf = AN.frame_of(ts)
+    p0, p1 = AN.sample(EYE_T, ts)
+    if tf < T_CUT + .1:                                              # the frame of the cut: where s14d left it, on screen
+        p0 = p1 = to_world(EYE0, ts)
+    c, z = cam(ts)
+    R = max(34., .032 * S0 * z)
+    look = look_at(tf, AN.value(EYE_T, tf)[0])
+    s0, s1 = to_screen(p0, ts), to_screen(p1, ts)
+    def bbox(te):
+        (kind, box), age = (brackets_at(te)[0] or (None, None)), brackets_at(te)[1]
+        if kind == 'w':
+            a, b = to_screen(box[:2], ts), to_screen(box[2:], ts); return kind, (a[0], a[1], b[0], b[1]), age
+        return kind, (box if kind else (0., 0., 0., 0.)), age
+    kind, bx, age = bbox(tf)
+    sn, held = _snap(max(0., age))
+    lk_held = _lock(tf - T_LOCK)[1] if T_LOCK <= tf < T_REACH else True
+    if held and lk_held:
+        bx0 = bx1 = bx; sn0 = sn1 = sn
+    else:                                                            # this frame moves: both ends of its slice
+        u = (ts - tf) / (.5 * FR) + .5
+        i = min(3, max(0, int(u * 4)))
+        e0 = tf - .5 * FR + i * FR / 4; e1 = e0 + FR / 4
+        _, bx0, a0 = bbox(e0); _, bx1, a1 = bbox(e1)
+        sn0, sn1 = _snap(max(0., a0))[0], _snap(max(0., a1))[0]
+    return dict(u_e0=(s0[0], s0[1], R, look), u_e1=(s1[0], s1[1], R, look), u_eRed=red_at(tf), u_bx0=bx0, u_bx1=bx1,
+                u_bA=1. if kind else 0., u_bSn0=sn0, u_bSn1=sn1, u_pupS=pupil_at(tf), u_eyeA=0. if HIDE_EYE else 1.)
+
+
+# ---------------- the sweep: the whip passes each paper and throws it off the desk
+def whip_x(t):
+    return AN.value(EYE_T, t)[0][0] if t >= T_X - .05 else 2.0
+
+
+HITS = []
+for i, ((cx, cy), ang) in enumerate(LAY):
+    c = q2w((cx, cy))
+    th = T_X - .05
+    while th < T_X + .5 and whip_x(th) > max(c[0] + .1, 1.52): th += .002
+    r = random.Random(40 + i)
+    HITS.append((th, (-(c[0] - r.uniform(.55, .75)) / .2, r.uniform(-.7, .7)), r.uniform(-7, 7)))
+
+
+def paper_state(i, t):
+    """(q centre, angle rad, drop, alpha)"""
+    (cx, cy), ang = LAY[i]
+    tl = LAND[i]
+    if t < tl - .17: return None
+    a = clamp((t - tl + .17) / .17)
+    drop = (1 - a) ** 2
+    alpha = min(1., a * 3.)
+    th, V, spin = HITS[i]
+    ang = math.radians(ang)
+    if t > th:
+        k = (1 - math.exp(-(t - th) / .2)) * .2
+        w = q2w((cx, cy))
+        w = (w[0] + V[0] * k, w[1] + V[1] * k)
+        ang += spin * k
+        alpha *= clamp((w[0] - (G.DESK[0] + .05)) / .2) * clamp(((G.DESK[3] + .1) - w[1]) / .1) * clamp((w[1] - (G.DESK[1] - .1)) / .1)
+        cx, cy = w2q(w)
+    return (cx, cy), ang, drop, alpha
+
+
+SRC = S14E.SRC
+# ---- the shader, adapted: world camera, a desk under a lamp, paper stock, the overlay layers
+SRC = SRC.replace("uniform sampler2D u_front, u_back, u_pages;",
+"""uniform sampler2D u_front, u_back, u_pages, u_over, u_ui;
+uniform vec2 u_cam; uniform float u_camz, u_lift, u_hasOver;
+uniform vec2 u_letW;
+uniform vec3 u_stock[7]; uniform vec2 u_age[7];
+uniform vec2 u_gaze; uniform float u_grad, u_gpow, u_red; uniform vec4 u_bar; uniform float u_barA;
+uniform sampler2D u_under;""")
+SRC = SRC.replace("const vec2 EH = vec2(.31, .22);", """const float K = %K%;
+const vec2 LETC = vec2(%LX%, %LY%);
+const vec2 LAMP = vec2(%AX%, %AY%);
+const vec2 POOL = vec2(%PX%, %PY%);
+const vec4 DESK = vec4(%D0%, %D1%, %D2%, %D3%);
+const vec2 EH = vec2(.31, .22);""".replace('%K%', '%.5f' % K).replace('%LX%', '%.4f' % LETC[0]).replace('%LY%', '%.4f' % LETC[1])
+   .replace('%AX%', '%.4f' % LAMP[0]).replace('%AY%', '%.4f' % LAMP[1]).replace('%PX%', '%.4f' % POOL[0]).replace('%PY%', '%.4f' % POOL[1])
+   .replace('%D0%', '%.3f' % G.DESK[0]).replace('%D1%', '%.3f' % G.DESK[1]).replace('%D2%', '%.3f' % G.DESK[2]).replace('%D3%', '%.3f' % G.DESK[3]))
+# the letter: placed in the world, and lifted (a little bigger as it nears the eye)
+SRC = SRC.replace("  p.x -= u_letX; p.y -= u_letY;\n  p /= u_zoom;",
+                  "  p.x -= u_letX; p.y -= u_letY;\n  p -= vec2(u_letW.x - LETC.x, -(u_letW.y - LETC.y)) * K;\n  p /= u_zoom * u_lift;")
+# the papers: their stock
+SRC = SRC.replace("""  vec3 c = PAPER * (.955 + .05 * fbm(q * 50. + float(i) * 7.));
+  if(i == 0) c *= vec3(1., .985, .95);                             // the manuscript: an older, warmer paper
+  c = mix(c, INK, ink * .92);""",
+"""  vec3 c = u_stock[i] * (.955 + .05 * fbm(q * 50. + float(i) * 7.) + .02 * (vn(q * 900.) - .5));
+  float edge0 = min(hs.x - abs(q.x), hs.y - abs(q.y));
+  c *= mix(vec3(1.), vec3(.9, .8, .62), u_age[i].x * (1. - smoothstep(0., .03, edge0)));           // yellowed at the edges
+  float fox = smoothstep(.72, .8, fbm(q * 22. + float(i) * 13.)) * u_age[i].x;
+  c = mix(c, c * vec3(.86, .74, .58), fox * .6);                                                  // foxing
+  if(u_age[i].y > 0.){                                                                             // a fold: ridge and valley
+    float fy = u_age[i].y > 1.5 ? 0. : hs.y / 3.;
+    float dfy = q.y - fy;
+    c *= 1. + .06 * (smoothstep(-.012, 0., dfy) - smoothstep(0., .012, dfy)) - .05 * (1. - smoothstep(0., .003, abs(dfy)));
+  }
+  c *= 1. + .05 * (q.x / hs.x) * -.5 + .03 * (q.y / hs.y);                                        // a little curl: light from the lamp
+  vec4 ik = texture(u_pages, auv);
+  c = mix(c, ik.rgb, ik.a * .95);""")
+SRC = SRC.replace("  float ink = texture(u_pages, auv).a;\n", "")
+# shadows fall away from the lamp
+SRC = SRC.replace("vec2 qs = rot(-g.z) * (p - g.xy - vec2(.006, -.009));",
+                  "vec2 qs = rot(-g.z) * (p - g.xy - SHD);")
+SRC = SRC.replace("vec3 PAPER, INK, CREAM, WAX, NIGHT;", "vec3 PAPER, INK, CREAM, WAX, NIGHT; vec2 SHD;")
+# the main: world camera, desk, lamp
+SRC = SRC.replace("""  vec2 p = (fc - .5 * u_res) / u_res.y + u_shake;
+  float px = 1. / u_res.y;""",
+"""  vec2 sp = (fc - .5 * u_res) / u_res.y + u_shake;
+  vec2 w = u_cam + vec2(sp.x, -sp.y) / (u_camz * K);                     // world, metres
+  vec2 p = vec2(w.x - LETC.x, -(w.y - LETC.y)) * K;                       // letter space
+  float px = 1. / (u_res.y * u_camz);
+  vec2 ld = normalize(w - u_gaze + vec2(1e-4));
+  SHD = vec2(ld.x, -ld.y) * .012;""")
+SRC = SRC.replace("""  vec3 col = NIGHT * (1. + .05 * (fbm(fc * .05 / (u_res.y / 1080.)) - .5));
+  vec2 fr = abs(p) - vec2(.855, .47);
+  col = mix(col, srgb(200., 196., 186.), aa(abs(max(fr.x, fr.y)), px * 1.4) * .4);""",
+"""  // the desk: dark wood, three boards, drawn edges; the floor beyond
+  vec3 col;
+  float pxw = 1. / (u_res.y * u_camz * K);
+  bool onDesk = w.x > DESK.x && w.x < DESK.z && w.y > DESK.y && w.y < DESK.w;
+  if(onDesk){
+    float gr = fbm(vec2(w.x * 2.2, w.y * 70. + 3. * fbm(w * 4.)));
+    col = srgb(58., 45., 35.) * (.8 + .4 * gr);
+    float seam = min(abs(w.y - (DESK.y + (DESK.w - DESK.y) / 3.)), abs(w.y - (DESK.y + 2. * (DESK.w - DESK.y) / 3.)));
+    col *= 1. - .45 * (1. - smoothstep(0., pxw * 2., seam));
+  } else {
+    // large tiles, 60 cm, a little out of focus (the floor is 75 cm below the desk top)
+    float bl = .014 + pxw * 1.5;
+    vec2 tq = w / .6; vec2 ti = floor(tq); vec2 tf = fract(tq) * .6;
+    float tv = h21(ti * 1.37 + 4.1);
+    vec3 tile = srgb(150., 142., 131.) * (.9 + .16 * tv) * (.96 + .08 * fbm(w * 3. + ti * 2.));
+    tile *= 1. + .05 * (fbm(w * 7. + tv * 9.) - .5);                                           // a faint marbling, blurred
+    float eg = min(min(tf.x, .6 - tf.x), min(tf.y, .6 - tf.y));
+    tile = mix(tile, srgb(108., 100., 92.), (1. - smoothstep(.002, .002 + bl, eg)) * .8);        // grout
+    // the desk's shadow, thrown away from the eye
+    vec2 so = vec2(.10, .16);
+    vec2 sd2 = max(DESK.xy + so - w, w - DESK.zw - so);
+    float dsh = 1. - smoothstep(-.06, .1, max(sd2.x, sd2.y));
+    col = tile * (1. - .55 * dsh);
+  }
+  vec2 dq = max(DESK.xy - w, w - DESK.zw);
+  col = mix(col, srgb(232., 227., 214.), aa(abs(max(dq.x, dq.y)), pxw * 2.2) * .8);""")
+# the lamp's light over everything on the desk; the overlays; the lamp itself
+SRC = SRC.replace("""  if(leaving && Lt.a > 0.) col = Lt.rgb;
+  if(any(isnan(col))) col = NIGHT;""",
+"""  if(leaving && Lt.a > 0.) col = Lt.rgb;
+  // the letter when lifted: its own shadow grows away from it (drawn under it by darkening what it no longer covers)
+  vec4 over = texture(u_over, gl_FragCoord.xy / u_res);
+  col = mix(col, over.rgb, over.a * u_hasOver);
+  float dl = length(w - u_gaze);
+  float spot = exp(-pow(dl / u_grad, u_gpow));
+  vec2 bq = max(u_bar.xy - w, w - u_bar.zw);
+  float bar = (1. - smoothstep(-.004, .012, max(bq.x, bq.y))) * u_barA;
+  float I = .46 + .7 * spot + .22 * bar + .12 * exp(-dl * dl / 1.2);
+  vec3 tint = mix(vec3(.78, .82, .9), mix(vec3(1.04, .97, .86), vec3(1.25, .55, .5), u_red), clamp(spot + bar, 0., 1.));
+  col *= I * tint;
+  vec4 ui = texture(u_ui, gl_FragCoord.xy / u_res);
+  col = mix(col, ui.rgb, ui.a);
+  if(any(isnan(col))) col = NIGHT;""")
+# the letter lifted: a shadow on what lies under it
+SRC = SRC.replace("  vec4 Lt = letter(p, px);",
+"""  vec4 Lt = letter(p, px);
+  if(u_lift > 1.001){
+    vec2 so = SHD * (1. + 40. * (u_lift - 1.));
+    vec4 Ls = letter(p - so, px);
+    col *= 1. - Ls.a * (.45 - 2.5 * (u_lift - 1.));
+  }""")
+SRC = SRC.replace("  // his papers, in the order they fell",
+                  "  vec4 und = texture(u_under, gl_FragCoord.xy / u_res);\n  col = mix(col, und.rgb, und.a);\n  // his papers, in the order they fell")
+for a in ("u_pg[7]", "vec2 at = APEX", "vec4 und"):
+    assert a in SRC, a
+
+
+# the wax a little deeper, less loud
+SRC = SRC.replace("WAX = srgb(150., 18., 24.);", "WAX = srgb(126., 20., 26.);")
+# the whole picture as a function: the pupil looks through it (frosted glass), the eye is drawn over it
+SRC = SRC.replace("void main(){", "vec3 scene(vec2 FC){", 1)
+SRC = SRC.replace("gl_FragCoord.xy", "FC")
+SRC = SRC.replace("  fragColor = vec4(untone(col, FC) * u_weight, 1.);\n}", "  return col;\n}")
+SRC += r'''
+uniform vec4 u_e0, u_e1;            // the eye at the start and the end of this sub-frame's exposure: x, y (1080 units, y down), ring radius, look
+uniform float u_eRed, u_bA, u_bSn0, u_bSn1, u_pupS, u_eyeA;
+uniform vec4 u_bx0, u_bx1;          // what it brackets (1080 units), at both ends of the exposure
+uniform sampler2D u_ptr;            // your pointer, over everything
+const float GAPH = .42;             // half the gap, radians
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0., 1.)); }
+float sdRing(vec2 q, float R, float look){
+  float ang = atan(q.y, q.x);
+  float rel = mod(ang - look + 3.14159265, 6.2831853) - 3.14159265;
+  if(abs(rel) > GAPH) return abs(length(q) - R);
+  return min(length(q - R * vec2(cos(look + GAPH), sin(look + GAPH))), length(q - R * vec2(cos(look - GAPH), sin(look - GAPH))));
+}
+float sdBrackets(vec2 p, vec4 b, float sn){
+  vec2 c = (b.xy + b.zw) * .5;
+  float hw = (b.z - b.x) * .5 * sn + 7., hh = (b.w - b.y) * .5 * sn + 5.;
+  float bw = max(8., hh * .5);
+  float d = min(sdSeg(p, c + vec2(-hw, -hh), c + vec2(-hw - bw, 0.)), sdSeg(p, c + vec2(-hw - bw, 0.), c + vec2(-hw, hh)));
+  d = min(d, min(sdSeg(p, c + vec2(hw, -hh), c + vec2(hw + bw, 0.)), sdSeg(p, c + vec2(hw + bw, 0.), c + vec2(hw, hh))));
+  return d;
+}
+void main(){
+  vec2 F = gl_FragCoord.xy;
+  vec3 col = scene(F);
+  if(u_eyeA > 0.){
+    float sc = u_res.y / 1080.;
+    vec2 P = vec2(F.x, u_res.y - F.y) / sc;                          // 1080 units, y down
+    float pu = 1. / sc;                                               // a pixel, in 1080 units
+    float W = max(12., .18 * u_e1.z);                              // thick: a ring, not a line
+    vec3 CH = mix(srgb(238., 234., 222.), srgb(240., 84., 70.), u_eRed);
+    // near enough to bother?
+    vec2 cA = u_e0.xy, cB = u_e1.xy;
+    float near = sdSeg(P, cA, cB) - u_e0.z - 60.;
+    float nearB = u_bA > 0. ? (max(max(min(u_bx0.x, u_bx1.x) - P.x, P.x - max(u_bx0.z, u_bx1.z)), max(min(u_bx0.y, u_bx1.y) - P.y, P.y - max(u_bx0.w, u_bx1.w))) - 160.) : 1e5;
+    if(near < 0. || nearB < 0.){
+      float core = 0., shad = 0., glow = 0., pcov = 0.;
+      vec2 so = vec2(.08, .13) * u_e1.z;                               // where its shadow falls: it hangs above the desk
+      for(int k = 0; k < 24; k++){
+        float f = (float(k) + .5) / 24.;
+        vec2 c = mix(cA, cB, f);
+        float R = mix(u_e0.z, u_e1.z, f), lk = u_e1.w;
+        vec4 bxk = mix(u_bx0, u_bx1, f); float snk = mix(u_bSn0, u_bSn1, f);
+        float d = sdRing(P - c, R, lk);
+        if(u_bA > 0.) d = min(d, sdBrackets(P, bxk, snk));
+        vec2 pc = c + vec2(cos(lk), sin(lk)) * R * .22;
+        float pr = R * .38 * u_pupS;
+        float ds = sdRing(P - so - c, R, lk);
+        if(u_bA > 0.) ds = min(ds, sdBrackets(P - so * .5, bxk, snk));
+        ds = min(ds, length(P - so - pc) - pr + W * .5);
+        core += 1. - smoothstep(W * .5 - pu * .6, W * .5 + pu * .6, d);
+        shad += 1. - smoothstep(W * .5 - W * .8, W * .5 + W * 1.2, ds);
+        glow += exp(-max(d - W * .5, 0.) / (W * 1.8));
+        pcov += 1. - smoothstep(pr - pu * .7, pr + pu * .7, length(P - pc));
+      }
+      core /= 24.; shad /= 24.; glow /= 24.; pcov /= 24.;
+      col *= 1. - .58 * shad * u_eyeA;
+      // the pupil: frosted glass — what lies under it, blurred, tinted, grained; thicker at the rim; a soft light in it
+      if(pcov > 0.){
+        vec2 cm = mix(cA, cB, .5) + vec2(cos(u_e1.w), sin(u_e1.w)) * u_e1.z * .22;
+        float pr = u_e1.z * .38 * u_pupS;
+        vec2 cmF = vec2(cm.x, 1080. - cm.y) * sc;
+        vec3 acc = vec3(0.);
+        for(int i = 0; i < 12; i++){
+          float a = float(i) * 2.39996 + h11(floor(u_time * 11.) + float(i));
+          float rr = sqrt((float(i) + .5) / 12.) * pr * sc * .95;
+          acc += scene(F + vec2(cos(a), sin(a)) * rr);
+        }
+        acc /= 12.;
+        vec2 q = (P - cm) / pr; q.y = -q.y;
+        float frost = h21(floor(F * .8)) - .5;
+        // flat frosted glass: what lies under it, blurred and tinted; a light grain; a thin, lighter edge — no ball
+        vec3 glass = mix(acc, srgb(206., 46., 48.), .66) * (1. + .07 * frost);
+        float still = 1. / (1. + 3. * length(cB - cA) / pr);
+        glass = mix(glass, srgb(232., 120., 116.), (1. - smoothstep(.0, 1.4 * pu, abs(length(P - cm) - pr + 1.1 * pu))) * .35 * still);
+        col = mix(col, glass, pcov * u_eyeA);
+      }
+      col += CH * glow * .1 * u_eyeA;
+      col = mix(col, CH, core * u_eyeA);
+    }
+  }
+  vec4 ptr = texture(u_ptr, F / u_res);
+  col = mix(col, ptr.rgb, ptr.a);
+  if(any(isnan(col))) col = vec3(0.);
+  fragColor = vec4(untone(col, gl_FragCoord.xy) * u_weight, 1.);
+}
+'''
+
+
+def params(t):
+    P = S14E.params(t)
+    c, z = cam(t)
+    pos, lift, flip, _ = letter_state(t)
+    pg, pa = [], []
+    for i in range(7):
+        st = paper_state(i, t)
+        if st is None: pg.append((0., 0., 0., -9.)); pa.append(0.); continue
+        (cx, cy), ang, drop, alpha = st
+        pg.append((cx, cy, ang, drop)); pa.append(alpha)
+    g, gr, gp, red = gaze(t)
+    P.update(u_gaze=g, u_grad=gr, u_gpow=gp, u_red=red, u_bar=(0., 0., 0., 0.), u_barA=0.,
+             u_pg=pg, u_pgA=pa, u_cam=c, u_camz=z, u_lift=lift, u_letW=pos, u_flip=flip, u_letX=0., u_zoom=1., u_dim=0.,
+             u_letY=P['u_letY'], u_hasOver=1., u_envY=P['u_envY'] if t < 172.8 else -9.,
+             u_stock=[tuple(v / 255. for v in s[0]) for s in PAP.STOCK], u_age=[(s[1], float(s[2])) for s in PAP.STOCK])
+    P.update(eye_uniforms(t))
+    return P
+
+
+# ---------------- layers: under (the rule book), over (cabinet, folder), ui (scan line, detail), ptr (your pointer)
+def book_open(t):
+    return ease((t - (T_BOOK - .1)) / .12)
+
+
+def under(t, w, h):
+    """the rule book, lying on the desk under everything from the start"""
+    c, z = cam(t)
+    ob = book_open(t)
+    v = G.V(w, h, (c[0], c[1], S0 * z), seed=95)
+    bx, by = G.BOOK_C; pw, ph = G.PG
+    if ob < 1:
+        v.rect(bx - .01, by - ph / 2 - .01, bx + pw + .01, by + ph / 2 + .01, fill=(34, 32, 29, 255), w=.8)
+        cw = pw * math.cos(math.pi * ob)
+        pts = [(bx, by - ph / 2 - .008), (bx + cw, by - ph / 2 - .008), (bx + cw, by + ph / 2 + .008), (bx, by + ph / 2 + .008)]
+        if ob > .5: G._book(v, t)
+        v.fill(pts, (96, 34, 30, 255) if cw > 0 else (214, 204, 184, 255)); v.line(pts + [pts[0]], w=1.)
+        if cw > pw * .6: v.text(bx + cw / 2, by, 'RULES', 'COPRGTL.TTF', .03, anchor='mm', col=(224, 204, 150))
+    else:
+        G._book(v, t)
+    return v.S.result()
+
+
+def _fnt(n, bold=False):
+    return PAP.font('courbd.ttf' if bold else 'cour.ttf', max(1, n))
+
+
+def _labels(i, j, k):
+    return 'M.U.C.' if (i == 2 and j == k // 2) else '%d.%02d' % (i + 1, j + 1)
+
+
+def folder_pos(t):
+    return lerp2(FOLD0, FOLD1, ease((t - T_REACH - .16) / .2))
+
+
+def folder_tilt(t):
+    return ease((t - T_REACH - .12) / .2)
+
+
+def overlay(t, w, h):
+    """cabinet and folder, drawn at twice the size and brought down"""
+    c, z = cam(t)
+    W2, H2 = w * 2, h * 2
+    Wt = w * 1080 / h
+    s2 = H2 / 1080.
+    P = lambda x, y: ((Wt / 2 + (x - c[0]) * S0 * z) * s2, (540 + (y - c[1]) * S0 * z) * s2)
+    pxm = S0 * z * s2
+    img = Image.new('RGBA', (W2, H2), (0, 0, 0, 0))
+    if z < .9:
+        FG.cabinet(img, P, pxm, SHELF, 1. if t >= T_REACH + .12 else 0., LAMP3, font=_fnt, labels=_labels)
+    if t >= T_REACH + .12:
+        FG.folder_out(img, P, pxm, folder_pos(t), max(.05, folder_tilt(t)), lambda n: _fnt(n, True))
+    return img.resize((w, h), Image.LANCZOS)
+
+
+def ui(t, w, h):
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    s1 = h / 1080.
+    c, z = cam(t)
+    tf = AN.frame_of(t)
+    if SCAN0 <= tf < SCAN1:                                           # the red line under the eye, reading: a step at a time
+        j = min(3, int((tf - SCAN0) / STEPF))
+        y = LINES[j] + .012
+        (x0, yy), (x1, _) = to_screen((LETC[0] - .1063, y), t, w, h), to_screen((LETC[0] + .1063, y), t, w, h)
+        k = 3
+        lay = Image.new('RGBA', (int((x1 - x0 + 40) * s1 * k), int(40 * s1 * k)), (0, 0, 0, 0)); d = ImageDraw.Draw(lay)
+        d.line([(20 * s1 * k, 20 * s1 * k), ((x1 - x0 + 20) * s1 * k, 20 * s1 * k)], fill=(220, 40, 44, 90), width=int(9 * s1 * k))
+        lay = lay.filter(ImageFilter.GaussianBlur(5 * s1 * k)); d = ImageDraw.Draw(lay)
+        d.line([(20 * s1 * k, 20 * s1 * k), ((x1 - x0 + 20) * s1 * k, 20 * s1 * k)], fill=(222, 44, 46, 255), width=int(2.2 * s1 * k))
+        img.alpha_composite(lay.resize((int((x1 - x0 + 40) * s1), int(40 * s1)), Image.LANCZOS), (int((x0 - 20) * s1), int((yy - 20) * s1)))
+    if t >= T_LAY:
+        v2 = G.V(w, h, (c[0], c[1], S0 * z), seed=94)
+        G.FOLD1 = FOLD1
+        bx = G.detail(v2, img, t, sel=1. if CLICKS[0] <= t < T_SQ else 0.)
+        img.alpha_composite(v2.S.result())
+        if bx: G._panel(img, bx, t)
+    return img
+
+
+_BLANK = {}
+
+
+def ptr(t, w, h):
+    """your pointer: smooth, drawn fine, over everything (the eye included)"""
+    if t < PTR_IN or HIDE_POINTER:
+        if (w, h) not in _BLANK: _BLANK[(w, h)] = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        return _BLANK[(w, h)]
+    s1 = h / 1080.
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    x, y = pointer_xy(t, w, h)
+    k = 3
+    lay = Image.new('RGBA', (int(60 * s1 * k), int(60 * s1 * k)), (0, 0, 0, 0))
+    G.pointer(lay, 10, 10, s1 * k)
+    img.alpha_composite(lay.resize((int(60 * s1), int(60 * s1)), Image.LANCZOS), (int((x - 10) * s1), int((y - 10) * s1)))
+    return img
+
+
+_E = {}
+
+
+def letter_front():
+    """16 February 1930, to his mother: the verified sentence in his hand; the rest of the page handwriting texture"""
+    Wf, Hf = 1400, 1970
+    img = Image.new('RGBA', (Wf, Hf), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    r = random.Random(1930)
+    d.text((Wf - 120, 130), '16. II. 1930', font=PAP.font('Inkfree.ttf', 50), fill=(255, 255, 255, 250), anchor='rm')
+    y = PAP.cursive(d, r, 120, 300, Wf - 240, 76, 6, xh=19, fill=(255, 255, 255, 170), w=3) - 50
+    y = PAP.wrap_real(d, 120, y + 6, 'I feel sure that I shall meet Morcom again somewhere & that there will be some work for us to do together',
+                      PAP.font('Inkfree.ttf', 58), Wf - 240, 88, fill=(255, 255, 255, 255))
+    PAP.cursive(d, r, 120, y + 50, Wf - 240, 76, 8, xh=19, fill=(255, 255, 255, 170), w=3)
+    img.putalpha(img.split()[3].filter(ImageFilter.GaussianBlur(.7)))
+    return img
+
+
+def textures(t, w, h):
+    if not _E:
+        _E.update(f=letter_front(), b=S14E._back(), p=PAP.atlas())
+    return {'u_front': _E['f'], 'u_back': _E['b'], 'u_pages': _E['p'],
+            'u_over': overlay(t, w, h), 'u_ui': ui(t, w, h), 'u_under': under(t, w, h), 'u_ptr': ptr(t, w, h)}

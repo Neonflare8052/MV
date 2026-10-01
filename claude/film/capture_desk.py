@@ -1,0 +1,16 @@
+"""Render s14e_desk's last frame without the pointer to cache/desk_{h}p.png, and without the eye as well to
+cache/desk_noeye_{h}p.png: s15 squeezes the picture into its window (the eye is not part of the picture)."""
+import sys
+from pathlib import Path
+import master
+from gl import Renderer, save_png
+w, h = int(sys.argv[1]) if len(sys.argv) > 1 else 1920, int(sys.argv[2]) if len(sys.argv) > 2 else 1080
+s = master.shot('s14e_desk.py', 's14e_desk', w, h)
+s.MOD.HIDE_POINTER = True
+r = Renderer(w, h, '#version 330\nout vec4 o;void main(){o=vec4(0.);}', subframes=4)
+r.use('desk', s.SRC)
+out = Path(__file__).resolve().parent / 'cache'; out.mkdir(exist_ok=True)
+save_png(r.frame(174.97, s.params, s.textures, post=s.POST), w, h, out / f'desk_{h}p.png')
+s.MOD.HIDE_EYE = True
+save_png(r.frame(174.97, s.params, s.textures, post=s.POST), w, h, out / f'desk_noeye_{h}p.png')
+print('ok', out / f'desk_{h}p.png', out / f'desk_noeye_{h}p.png')

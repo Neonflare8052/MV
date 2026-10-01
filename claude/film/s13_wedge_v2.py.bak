@@ -1,0 +1,600 @@
+"""s13 · 2:27.66–2:42.63  twelve EXECUTIONs, six counts, EXECUTION.  Hate made out of love.
+Lissitzky's "Beat the Whites with the Red Wedge" is a heart taken apart: a white circle and a red wedge. A heart is
+two circles and a point. The program draws a heart, cuts its point off along DISHEARTENED's knife line, and that
+piece of the heart becomes the wedge. What fills the gap — the thing it always lacked — is made from the heart.
+
+1–4   construction in the character grid: a circle round the eye (me); a second circle (you); two tangents meet below —
+      a heart, glowing warm red; the knife line cuts its point off, and the point is printed solid, warm red.
+5–8   the page is printed: paper on the left, the terminal stays as the black field; only "me" is printed white (the eye
+      in ink on it) — "you" stays an empty outline; black bars, a heartbeat line on the terminal, EXECUTION stamped.
+9–12  the point comes loose, turns and aims at the eye, and is printed longer in three pushes — a wedge. The 12th fits
+      its tip exactly into the iris gap: the ring is complete. It stops. The warm red turns to blood and runs into the
+      iris. The camera cuts to the eye: the wedge was never going in — it is the eye's gaze going out.
+EIN..LIU  six glances: the gaze snaps round (the gap points where the eye looks); each stops on something and stamps a
+      numeral there; where it has rested the paper is soaked. It looks at the heartbeat line; the last look is "you" —
+      the empty circle fills with blood. The Frankenstein line is typed along the knife line; LOVE in warm red, turned
+      to blood at LIU; at the end only FEAR is left.
+EXECUTION  the gaze turns out of the page to us: the wedge foreshortens to a disc, blood fills the screen — freeze — black."""
+import math
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+import importlib.util
+
+_P = Path(__file__).resolve().parent / 's12_exe.py'
+_spec = importlib.util.spec_from_file_location('s12src', _P); S12 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(S12)
+T7 = S12.T7
+CH = T7.CHARS
+G_DASH, G_BAR, G_SL, G_BS = CH.index('-'), CH.index('|'), CH.index('/'), CH.index(chr(92))
+
+E = [147.660, 148.600, 149.520, 150.540, 151.520, 152.280, 153.160, 153.980, 155.200, 156.080, 157.040, 158.000]
+C = [158.900, 159.321, 159.657, 160.244, 160.693, 161.124]
+X, END = 161.584, 162.632
+
+
+def add(a, b): return (a[0] + b[0], a[1] + b[1])
+def sub(a, b): return (a[0] - b[0], a[1] - b[1])
+def mul(a, k): return (a[0] * k, a[1] * k)
+def nrm(a): l = math.hypot(*a); return (a[0] / l, a[1] / l)
+def rot(a, t): c, s = math.cos(t), math.sin(t); return (a[0] * c - a[1] * s, a[0] * s + a[1] * c)
+def ang(a): return math.atan2(a[1], a[0])
+def dirv(t): return (math.cos(t), math.sin(t))
+
+
+# ---- the heart: me (the eye) and you, two touching circles; a point below
+R0 = .52
+ME, YOU = (0., 0.), (1.04, 0.)
+V = (.52, -1.3)
+
+
+def tangent(c, r, p, outer):
+    d = math.hypot(*sub(p, c)); b = ang(sub(p, c)); a = math.acos(r / d)
+    cands = [add(c, mul(dirv(b + a), r)), add(c, mul(dirv(b - a), r))]
+    return min(cands, key=lambda q: q[0]) if outer == 'left' else max(cands, key=lambda q: q[0])
+
+
+TL, TR = tangent(ME, R0, V, 'left'), tangent(YOU, R0, V, 'right')
+# the knife line (DISHEARTENED's angle) cuts the point off
+AX = (0.94386, -0.33035)
+K = (.52, -.84)
+
+
+def cross2(a, b): return a[0] * b[1] - a[1] * b[0]
+
+
+def meet(p, d, a, b):
+    """line p + d s  with segment a-b"""
+    e = sub(b, a); s = cross2(sub(a, p), e) / cross2(d, e)
+    return add(p, mul(d, s))
+
+
+C1, C2 = meet(K, AX, V, TL), meet(K, AX, V, TR)
+MB = mul(add(C1, C2), .5)
+# where the point goes: aimed at the eye from the lower left
+U = nrm((1.7, .75))
+IRIS_S = .1
+TF = mul(U, -(IRIS_S * .47 + .3 * .47))              # the middle of the iris gap
+BASE = mul(U, -2.05)
+DROT = ang(U) - ang(sub(V, MB))
+C1n, C2n = add(BASE, rot(sub(C1, MB), DROT)), add(BASE, rot(sub(C2, MB), DROT))
+V9 = add(BASE, rot(sub(V, MB), DROT))
+TIPS = [V9, mul(U, -1.25), mul(U, -.64), TF]
+GL = math.hypot(*sub(BASE, TF))                      # the gaze's length and half width
+GW = math.hypot(*sub(C1n, C2n)) * .5
+TH0 = ang(mul(U, -1.))
+
+# ---- the six glances: (angle deg, numeral, font, distance, height, colour 0 ink / 2 paper)
+GLANCE = [(97., 'EIN', 'impact.ttf', .8, .12, 2),
+          (203., 'DOS', 'impact.ttf', 1.4, .17, 0),
+          (143., 'TROIS', 'impact.ttf', 1.22, .14, 0),
+          (283., '넷', 'malgunbd.ttf', .8, .2, 2),
+          (38., 'FEM', 'impact.ttf', .98, .15, 2),
+          (0., '六', 'msyhbd.ttc', 1.04, .42, 2)]
+NUMS = []
+for a, txt, font, d, H, col in GLANCE:
+    ar = math.radians(a)
+    c = (math.cos(ar) * d, math.sin(ar) * d) if txt != '六' else YOU
+    r = a if math.cos(ar) >= -1e-6 else a + 180.
+    if txt == '六': r = 0.
+    NUMS.append((txt, font, c, r, H, col))
+ECG = (-.5, .3, .64)                                   # heartbeat line on the terminal: x0, x1, y
+INSC = 'IF I CANNOT INSPIRE LOVE, I WILL CAUSE FEAR'
+WORD = ('EXECUTION', (-1.12, .06), 79.5, .085)
+
+
+def _row(text, font, H=256, pad=10):
+    f = ImageFont.truetype('C:/Windows/Fonts/' + font, int(H * 1.1))
+    b = f.getbbox(text)
+    s = (H - 2 * pad) / (b[3] - b[1])
+    f = ImageFont.truetype('C:/Windows/Fonts/' + font, max(8, int(H * 1.1 * s)))
+    b = f.getbbox(text)
+    img = Image.new('L', (b[2] - b[0] + 2 * pad, H), 0)
+    ImageDraw.Draw(img).text((pad - b[0], pad - b[1]), text, font=f, fill=255)
+    return img
+
+
+def _insc(H=128, pad=6):
+    """the line in A, LOVE in G, FEAR in B; and each character's right edge for the typed reveal"""
+    f = ImageFont.truetype('C:/Windows/Fonts/impact.ttf', 110)
+    b = f.getbbox(INSC)
+    s = (H - 2 * pad) / (b[3] - b[1])
+    f = ImageFont.truetype('C:/Windows/Fonts/impact.ttf', int(110 * s))
+    b = f.getbbox(INSC)
+    W = b[2] - b[0] + 2 * pad
+    org = (pad - b[0], pad - b[1])
+    chans = []
+    for word in (None, 'LOVE', 'FEAR'):
+        im = Image.new('L', (W, H), 0); d = ImageDraw.Draw(im)
+        if word is None: d.text(org, INSC, font=f, fill=255)
+        else:
+            i = INSC.index(word); d.text((org[0] + f.getlength(INSC[:i]), org[1]), word, font=f, fill=255)
+        chans.append(im)
+    edges = [(pad + f.getlength(INSC[:i])) / W for i in range(1, len(INSC) + 1)]
+    return Image.merge('RGBA', (chans[0], chans[1], chans[2], chans[0])), W / H, edges
+
+
+def _build():
+    rows = [_row(t, f) for t, f, *_ in NUMS]
+    at = Image.new('RGBA', (1024, 256 * len(rows)), (255, 255, 255, 0))
+    asp = []
+    for k, r in enumerate(rows):
+        at.paste(Image.merge('RGBA', (r, r, r, r)), (0, 256 * k)); asp.append(r.size[0] / 256)
+    word = _row(WORD[0], 'impact.ttf')
+    rgba = lambda r: Image.merge('RGBA', (r, r, r, r))
+    return at, asp, rgba(word), word.size[0] / 256
+
+
+ATLAS, ASP, WORD_IMG, WORD_ASP = _build()
+INSC_IMG, INSC_ASP, INSC_EDGES = _insc()
+INSC_H = .072
+INSC_S0 = -1.95                                    # where the line starts along the knife line (from K)
+
+
+def _v(p): return 'vec2(%.5f,%.5f)' % tuple(p)
+
+
+SEGS = [(add(K, mul(AX, -3.2)), add(K, mul(AX, 1.3))),   # 0 the knife line
+        (TL, C1), (C1, V), (V, C2), (C2, TR),              # 1–4 the heart's point
+        ((-.035, 0.), (.035, 0.)), ((0., -.035), (0., .035)),
+        ((YOU[0] - .035, 0.), (YOU[0] + .035, 0.)), ((YOU[0], -.035), (YOU[0], .035))]
+HEARTSEG = [0, 1, 1, 1, 1, 1, 1, 1, 1]
+NSEG = len(SEGS)
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec2 u_iris; uniform float u_gapA, u_lid, u_pupil;
+uniform sampler2D u_glyphs, u_nums, u_word, u_insc;
+uniform float u_clk, u_red, u_garb;
+uniform float u_zoom, u_ang; uniform vec2 u_ctr, u_shake;
+uniform float u_seg[%NSEG%], u_segA[%NSEG%];
+uniform float u_circ[2];
+uniform float u_heartFill, u_heartCol, u_tick, u_target;
+uniform vec3 u_head;
+uniform float u_scanA, u_scanC, u_scanB, u_wordA, u_ecg;
+uniform vec2 u_wa, u_wb, u_wc; uniform float u_wOn, u_blood, u_hot, u_irisRed;
+uniform vec2 u_sa[7], u_sb[7], u_sc[7]; uniform float u_nst;
+uniform float u_num[6], u_you;
+uniform float u_insX, u_loveB, u_insFade, u_fear;
+uniform vec2 u_disc; uniform float u_discR;
+uniform float u_black;
+out vec4 fragColor;
+#define PI 3.14159265
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.03+1.7; a*=.5; } return s; }
+''' + S12.EYE_GLSL + r'''
+const float R0=%R0%, RH=.0123;
+const vec2 ME=vec2(0.), YOU=%YOU%, HV=%V%, HTL=%TL%, HTR=%TR%, KN=%K%, AX=vec2(.94386,-.33035);
+const vec2 P0=vec2(-.78,0.), NB=vec2(.98387,-.17910);
+const vec2 SA[%NSEG%]=vec2[%NSEG%](%SA%), SB[%NSEG%]=vec2[%NSEG%](%SB%);
+const float SH[%NSEG%]=float[%NSEG%](%SH%);
+const float G_DASH=%GD%., G_BAR=%GB%., G_SL=%GS%., G_BS=%GK%.;
+const float ASP[6]=float[6](%ASP%);
+const vec2 NC[6]=vec2[6](%NC%);
+const float NA[6]=float[6](%NA%), NH[6]=float[6](%NH%), NK[6]=float[6](%NK%);
+const vec3 PAPER=vec3(.62,.56,.47), INK=vec3(.012,.011,.012), WARM=vec3(.95,.06,.1), BLOOD=vec3(.17,.002,.005);
+float PXq;
+
+vec2 seg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return vec2(length(pa-ba*h),h); }
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,s,-s,c); }
+float sdTri(vec2 p, vec2 p0, vec2 p1, vec2 p2){
+  vec2 e0=p1-p0,e1=p2-p1,e2=p0-p2; vec2 v0=p-p0,v1=p-p1,v2=p-p2;
+  vec2 pq0=v0-e0*clamp(dot(v0,e0)/max(dot(e0,e0),1e-9),0.,1.);
+  vec2 pq1=v1-e1*clamp(dot(v1,e1)/max(dot(e1,e1),1e-9),0.,1.);
+  vec2 pq2=v2-e2*clamp(dot(v2,e2)/max(dot(e2,e2),1e-9),0.,1.);
+  float s=sign(e0.x*e2.y-e0.y*e2.x);
+  vec2 d=min(min(vec2(dot(pq0,pq0),s*(v0.x*e0.y-v0.y*e0.x)),vec2(dot(pq1,pq1),s*(v1.x*e1.y-v1.y*e1.x))),vec2(dot(pq2,pq2),s*(v2.x*e2.y-v2.y*e2.x)));
+  return -sqrt(d.x)*sign(d.y);
+}
+float sdHeart(vec2 q){
+  float d=min(length(q-ME)-R0,length(q-YOU)-R0);
+  d=min(d,sdTri(q,HV,HTL,HTR)); d=min(d,sdTri(q,HTL,ME,YOU)); d=min(d,sdTri(q,HTL,YOU,HTR));
+  return d;
+}
+// construction strokes drawn so far: (distance, direction, heart?)
+vec3 strokes(vec2 q){
+  vec3 best=vec3(1e3,0.,0.);
+  for(int i=0;i<%NSEG%;i++){
+    if(u_seg[i]<=0.||u_segA[i]<=0.) continue;
+    vec2 b=mix(SA[i],SB[i],u_seg[i]);
+    float d=seg(q,SA[i],b).x/u_segA[i];
+    if(d<best.x) best=vec3(d,atan(SB[i].y-SA[i].y,SB[i].x-SA[i].x),SH[i]);
+  }
+  for(int k=0;k<2;k++){
+    if(u_circ[k]<=0.) continue;
+    vec2 c=k==0?ME:YOU;
+    float a=atan(q.y-c.y,q.x-c.x), a0=k==0?PI:-PI*.5;
+    float rel=mod(a-a0,2.*PI);
+    if(rel<u_circ[k]*2.*PI){ float d=abs(length(q-c)-R0); if(d<best.x) best=vec3(d,a+PI*.5,1.); }
+  }
+  return best;
+}
+float glyphFor(float a){
+  float t=mod(a,PI);
+  if(t<PI/8.||t>7.*PI/8.) return G_DASH;
+  if(t<3.*PI/8.) return G_SL;
+  if(t<5.*PI/8.) return G_BAR;
+  return G_BS;
+}
+float scan(float r, float xf, float prog){ return step(r+xf,prog); }
+float paperAt(vec2 q){
+  float side=1.-smoothstep(-PXq,PXq,dot(q-P0,NB));
+  float r=floor((1.8-q.y)/RH), xf=clamp((q.x+3.)/4.8,0.,1.);
+  return scan(r,xf,u_scanA)*side;
+}
+float circleAt(vec2 q){
+  float edge=1.-smoothstep(-PXq,PXq,length(q)-R0);
+  float r=floor((R0-q.y)/RH), xf=(q.x+R0)/(2.*R0);
+  return scan(r,xf,u_scanC)*edge;
+}
+float box(vec2 q, vec2 c, vec2 hs, float a){
+  vec2 l=rot(-a)*(q-c);
+  vec2 d=abs(l)-hs;
+  float sd=length(max(d,0.))+min(max(d.x,d.y),0.);
+  float r=floor((hs.y-l.y)/.004), xf=(l.x+hs.x)/(2.*hs.x);
+  return (1.-smoothstep(-PXq,PXq,sd))*scan(r,xf,u_scanB*(2.*hs.y/.004+1.));
+}
+vec4 stamp4(sampler2D tx, vec2 q, vec2 c, float an, float H, float asp, float rows, float row, float reveal){
+  vec2 l=rot(-an)*(q-c)/H;
+  if(abs(l.y)>.5||abs(l.x)>asp*.5) return vec4(0.);
+  if(l.x+asp*.5>reveal*asp) return vec4(0.);
+  vec2 ts=vec2(textureSize(tx,0));
+  vec2 tc=vec2((l.x+asp*.5)*(ts.y/rows)/ts.x, 1.-(row+1.)/rows+(l.y+.5)/rows);
+  return texture(tx,tc);
+}
+// where the gaze has rested, the page is soaked
+float soaked(vec2 q){
+  float s=0.;
+  for(int k=0;k<7;k++){
+    if(float(k)>=u_nst) break;
+    float d=sdTri(q,u_sa[k],u_sb[k],u_sc[k])+.02*(fbm(q*18.+float(k))-.5);
+    s=max(s,1.-smoothstep(-.01,.012,d));
+  }
+  return s;
+}
+float ecgY(float x){
+  float u=(x-%ECX0%)/(%ECX1%-%ECX0%);
+  float p=fract(u*2.);
+  float y=.012*exp(-pow((p-.3)/.03,2.))+.11*exp(-pow((p-.45)/.008,2.))-.045*exp(-pow((p-.475)/.008,2.))+.022*exp(-pow((p-.65)/.04,2.));
+  return %ECY%+y;
+}
+
+vec3 poster(vec2 q){
+  vec2 cell=vec2(1.72/COLS,.96/ROWS);
+  LOD=max(log2(48./(cell.x*u_res.y*u_zoom)),0.);
+  vec2 g=(q+vec2(.86,-.48))/cell*vec2(1.,-1.);
+  float col=floor(g.x), row=floor(g.y);
+  vec2 f=vec2(fract(g.x),1.-fract(g.y));
+  vec2 cc=vec2((col+.5)*cell.x-.86,.48-(row+.5)*cell.y);
+
+  float pap=paperAt(q), circ=circleAt(q), cpap=max(paperAt(cc),circleAt(cc)), onCirc=circleAt(cc);
+  float grain=.9+.14*fbm(q*3.)+.05*(vn(q*380.)-.5);
+  vec3 paper=PAPER*grain;
+  vec3 c=vec3(.006);
+  vec2 ek=eye(cc);
+  // the terminal: garbage, first all red '!'
+  if(ek.y<.5&&cpap<.5){
+    float rate=4.+20.*h12(vec2(col,row)*.7);
+    float tick=floor(u_clk*rate+h12(vec2(row,col))*9.);
+    float gl=NR+floor(h12(vec2(col,row)+tick*.173)*NJ);
+    float patch=vn(cc*6.+vec2(u_clk*.3,0.));
+    float ink=(.06+.17*patch*patch+.3*step(.985,h12(vec2(col,row)+tick)))*u_garb;
+    vec3 cg=vec3(.62,.66,.62);
+    if(h12(vec2(col,row)*1.31+.7)<u_red){ gl=EXCL; ink=.55+.45*step(.5,fract(u_clk*9.+h12(vec2(row,col)))); cg=vec3(1.,.16,.12); }
+    c+=cg*ink*glyphMask(gl,f);
+  }
+  // the heart, glowing warm while it is whole
+  if(u_heartFill>0.){
+    float hd=sdHeart(q);
+    c+=WARM*u_heartFill*(.16*(1.-smoothstep(-PXq,PXq,hd))+.5*exp(-abs(hd)*u_zoom*160.));
+  }
+  c=mix(c,paper,max(pap,circ));
+  // soaked where the gaze rested
+  float sk=soaked(q);
+  c=mix(c,mix(c+BLOOD*.35,c*vec3(.58,.12,.11)*(.8+.4*fbm(q*40.)),max(pap,circ)),sk);
+  // construction: hairlines and their rasterisation into characters
+  vec3 sp=strokes(q), sc=strokes(cc);
+  float hair=1.-smoothstep(.0006,.0006+1.3*PXq,sp.x);
+  float chr=step(sc.x,cell.y*.42)*glyphMask(glyphFor(sc.y),f);
+  float tk=0.;
+  if(u_tick>0.){
+    float sa=dot(q-KN,AX), sn=dot(q-KN,vec2(-AX.y,AX.x));
+    float idx=floor(sa/.06+.5); float s0=idx*.06;
+    float len_=mod(idx,5.)==0.?.03:.014;
+    if(s0>-3.&&s0<1.2&&(s0+3.)/4.2<u_tick) tk=1.-smoothstep(.0005,.0005+1.3*PXq,seg(vec2(sa,sn),vec2(s0,0.),vec2(s0,-len_)).x);
+  }
+  float tg=0.;
+  if(u_target>0.){
+    vec2 tq=q-%TF%;
+    tg=1.-smoothstep(.0005,.0005+1.3*PXq,abs(length(tq)-.03));
+    tg=max(tg,(1.-smoothstep(.0005,.0005+1.3*PXq,min(abs(tq.x),abs(tq.y))))*step(length(tq),.055)*step(.015,length(tq)));
+    tg*=u_target;
+  }
+  float line=max(max(hair,tk),tg);
+  vec3 lc=mix(vec3(.9,.92,.9),WARM*1.4,max(sp.z,sc.z)*u_heartCol);
+  c=mix(c+lc*(line*.9+chr*.55),mix(c,vec3(.05,.05,.06),min(line*.55+chr*.35,1.)),cpap);
+  // printed shapes
+  c=mix(c,INK,box(q,vec2(-1.95,.42),vec2(.62,.03),radians(58.)));
+  c=mix(c,INK,box(q,vec2(-1.25,-1.02),vec2(.5,.012),radians(23.8)));
+  c=mix(c,INK,box(q,vec2(-1.55,-.3),vec2(.055,.055),radians(21.)));
+  if(u_wordA>0.){
+    float w=stamp4(u_word,q,%WC%,radians(%WA%),%WH%*(1.+.35*exp(-u_wordA*30.)),%WASP%,1.,0.,1.).a;
+    c=mix(c,INK,w*(.88+.12*fbm(q*60.)));
+  }
+  // the heartbeat on the terminal
+  if(u_ecg>0.&&q.x>%ECX0%&&q.x<mix(%ECX0%,%ECX1%,u_ecg)){
+    float y=ecgY(q.x), dy=(ecgY(q.x+.002)-ecgY(q.x-.002))/.004;
+    float l=1.-smoothstep(.0012,.0012+1.3*PXq,abs(q.y-y)/sqrt(1.+dy*dy));
+    c=mix(c,mix(vec3(.9,.92,.9)*1.2,BLOOD*2.,sk),l);
+  }
+  // the eye: ink on the white circle, light on the terminal; blood runs into the iris from the gap
+  if(ek.y>=.5){
+    float d=ek.x, gl;
+    if(ek.y<1.5){ float jit=h12(vec2(col,row)+floor(u_clk*3.)*.37); gl=clamp(floor(d*9.+(jit-.5)*.9),0.,9.); }
+    else gl=NR+(cc.x<-.08?%SLB%.:(cc.x>.08?%SLF%.:%SLP%.));
+    float ink=(ek.y<1.5?.15+.85*pow(d,1.1):d)*glyphMask(gl,f);
+    vec2 iq=(cc-u_iris*.47)/.47; float ir=length(iq), ia=atan(iq.y,iq.x);
+    float gapd=abs(mod(ia-u_gapA+PI,2.*PI)-PI);
+    float bl=step(ir,.44)*step(gapd,u_irisRed*PI*1.02)*step(.5,ek.y)*step(ek.y,1.5);
+    vec3 onPaper=mix(c,mix(INK,BLOOD*1.6,bl),min(ink*(1.9+1.5*bl),1.));
+    vec3 onTerm=c+mix(vec3(.92,.93,.9),BLOOD*2.5,bl)*ink;
+    c=mix(onTerm,onPaper,onCirc);
+  }
+  // "you": the empty circle, filled with blood by the last look
+  if(u_you>0.){
+    vec2 hp=YOU-vec2(R0,0.);
+    float reach=length(q-hp)-u_you*1.15+.05*(fbm(q*14.)-.5);
+    float inC=1.-smoothstep(-PXq,PXq,length(q-YOU)-R0);
+    c=mix(c,BLOOD*(.8+.4*fbm(q*30.)),inC*(1.-smoothstep(-.004,.004,reach)));
+  }
+  // the wedge / the gaze
+  if(u_wOn>0.){
+    float wd=sdTri(q,u_wa,u_wb,u_wc);
+    float m=(1.-smoothstep(-PXq,PXq,wd))*u_wOn;
+    if(m>0.){
+      vec2 ax=normalize((u_wb+u_wc)*.5-u_wa);
+      float s=dot(q-u_wa,ax);
+      float hl=1.-.07*(1.-smoothstep(.0,1.5*PXq,abs(fract(s/.0123)-.5)*.0123-.0005))*(1.-u_blood);
+      vec3 warm=WARM*(.92+.1*fbm(q*25.))*hl;
+      float wet=fbm(q*9.+vec2(0.,u_clk*.05));
+      vec3 blood=BLOOD*(.7+.6*wet)+vec3(.35,.05,.05)*pow(max(1.-abs(wd)*u_zoom*300.,0.),4.)*.6;   // a wet edge
+      vec3 rc=mix(warm,blood,u_blood);
+      rc+=vec3(1.,.55,.35)*u_hot*exp(-s*14.);
+      c=mix(c,rc,m);
+    }
+  }
+  // the inscription along the knife line: LOVE warm, then blood; at the end only FEAR
+  if(u_insX>0.){
+    vec2 cen=KN+AX*(%INSS0%+%IASP%*%INSH%*.5)+vec2(-AX.y,AX.x)*.032;
+    vec4 tx=stamp4(u_insc,q,cen,atan(AX.y,AX.x),%INSH%,%IASP%,1.,0.,u_insX);
+    float onP=max(pap,circ);
+    vec3 base=mix(vec3(.85,.82,.76),INK,onP);
+    float love=tx.g, fear=tx.b, rest=max(tx.a-love-fear,0.);
+    c=mix(c,base,rest*(1.-u_insFade));
+    c=mix(c,mix(WARM,BLOOD*2.4,u_loveB),love*(1.-u_insFade));
+    c=mix(c,mix(base,BLOOD*3.5,u_fear),fear*(1.-u_insFade*(1.-u_fear)));
+  }
+  // six numerals
+  for(int k=0;k<6;k++){
+    if(u_num[k]<0.) continue;
+    float sc_=1.+.55*exp(-u_num[k]*32.);
+    float a=stamp4(u_nums,q,NC[k],radians(NA[k]),NH[k]*sc_,ASP[k],6.,float(k),1.).a;
+    vec3 kc=NK[k]<.5?INK:PAPER*grain*1.1;
+    c=mix(c,kc,a*(.9+.1*fbm(q*50.+float(k))));
+  }
+  // the gaze turned to us: a disc of blood
+  if(u_discR>0.){
+    float dd=length(q-u_disc)-u_discR*(1.+.012*(fbm(q*6.)-.5));
+    c=mix(c,BLOOD*(.75+.5*fbm(q*8.)),1.-smoothstep(-PXq*2.,PXq*2.,dd));
+  }
+  if(u_head.z>0.){ float l=length(q-u_head.xy); c+=vec3(1.,.95,.88)*u_head.z*(exp(-l*u_zoom*700.)*3.+exp(-l*u_zoom*70.)*.25); }
+  return c;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  PXq=1./(u_res.y*u_zoom);
+  vec2 q=u_ctr+rot(u_ang)*(uv+u_shake)/u_zoom;
+  vec3 c=poster(q);
+  c*=1.-u_black;
+  fragColor=vec4(c*u_weight,1.);
+}
+'''
+_rep = {
+    '%NSEG%': str(NSEG), '%R0%': '%.4f' % R0, '%YOU%': _v(YOU), '%V%': _v(V), '%TL%': _v(TL), '%TR%': _v(TR), '%K%': _v(K),
+    '%SA%': ','.join(_v(a) for a, b in SEGS), '%SB%': ','.join(_v(b) for a, b in SEGS),
+    '%SH%': ','.join('%d.' % h for h in HEARTSEG),
+    '%GD%': str(G_DASH), '%GB%': str(G_BAR), '%GS%': str(G_SL), '%GK%': str(G_BS),
+    '%ASP%': ','.join('%.4f' % a for a in ASP), '%NC%': ','.join(_v(n[2]) for n in NUMS),
+    '%NA%': ','.join('%.2f' % n[3] for n in NUMS), '%NH%': ','.join('%.3f' % n[4] for n in NUMS),
+    '%NK%': ','.join('%d.' % n[5] for n in NUMS),
+    '%TF%': _v(TF), '%WC%': _v(WORD[1]), '%WA%': '%.2f' % WORD[2], '%WH%': '%.3f' % WORD[3], '%WASP%': '%.4f' % WORD_ASP,
+    '%IASP%': '%.4f' % INSC_ASP, '%INSH%': '%.4f' % INSC_H, '%INSS0%': '(%.4f)' % INSC_S0,
+    '%ECX0%': '(%.4f)' % ECG[0], '%ECX1%': '(%.4f)' % ECG[1], '%ECY%': '(%.4f)' % ECG[2],
+    '%SLB%': str(T7.JUNK.index(chr(92)) + 10), '%SLF%': str(T7.JUNK.index('/') + 10), '%SLP%': str(T7.JUNK.index('|') + 10),
+}
+for k, v in _rep.items(): SRC = SRC.replace(k, v)
+POST = dict(u_bloom=.28, u_ca=.004)
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+def lerp2(a, b, k): return (lerp(a[0], b[0], k), lerp(a[1], b[1], k))
+def draw(t, t0, dur): return clamp((t - t0) / dur) if t >= t0 else 0.
+
+
+def camera(t):
+    """frontal on the eye pulling back to the whole heart; the page, tilted; along the wedge; the eye, centred"""
+    if t < E[4]:
+        k = ease((t - E[0] - .15) / (E[2] + .4 - E[0] - .15))
+        return lerp(1., .5, k), 0., lerp2((0., 0.), (.52, -.38), k)
+    if t < E[8]:
+        k = (t - E[4]) / (E[8] - E[4])
+        return .42 + .03 * k, math.radians(-9. - 1.5 * k), (-.5 + .05 * k, -.3)
+    if t < E[11]:
+        k = ease((t - E[8]) / (E[11] - E[8]))
+        return lerp(.72, .95, k), math.radians(14.), lerp2(mul(U, -1.75), mul(U, -.6), k)
+    k = (t - E[11]) / (X - E[11])
+    z = .47 + .03 * k + .06 * ease((t - C[5]) / (X - C[5]))
+    return z, math.radians(3. - 1.5 * k), (.2, .04)
+
+
+def shake(t):
+    x = y = 0.
+    for i, t0 in enumerate(E[8:] + C):
+        a = t - t0
+        if 0 <= a < .3:
+            e = math.exp(-a * 22) * (.012 if i < 4 else .009)
+            x += e * math.sin(a * 90 + i); y += e * math.cos(a * 77 + 2 * i)
+    return x, y
+
+
+def gaze_angle(t):
+    """after the 12th: the gaze's direction; snaps to each glance on the counts"""
+    th = TH0
+    for i, c in enumerate(C):
+        if t < c: break
+        tgt = math.radians(GLANCE[i][0])
+        d = (tgt - th + math.pi) % (2 * math.pi) - math.pi
+        th = th + d * outc((t - c) / .07)
+    return th
+
+
+def gaze_tri(th, L=GL, W=GW):
+    d = dirv(th); n = (-d[1], d[0])
+    irisC = mul(d, IRIS_S * .47)
+    apex = add(irisC, mul(d, .3 * .47))
+    b = add(apex, mul(d, L))
+    return apex, add(b, mul(n, W)), sub(b, mul(n, W))
+
+
+def params(t):
+    te = t
+    if X + .15 <= t < X + .36:
+        te = X + .15 + (.012 if t > X + .23 else 0.) + (.01 if t > X + .3 else 0.)
+    t = te
+    zoom, an, ctr = camera(t)
+    sx, sy = shake(t)
+    # the eye: staring at you; turns to the wedge on the 9th; after the 12th it is the gaze
+    if t < E[8]:
+        ix = .006 * math.sin(t * 13.); iy = .005 * math.sin(t * 9.1); gapA = math.radians(-90.)
+    else:
+        th = gaze_angle(t) if t >= E[11] else TH0
+        k = outc((t - E[8]) / .07)
+        ix, iy = mul(dirv(th), IRIS_S * k)
+        down = math.radians(-90.)
+        dd = ((th - down + math.pi) % (2 * math.pi)) - math.pi
+        gapA = down + dd * ease((t - E[8] + .02) / .14) if t < E[8] + .2 else th
+    # the wedge
+    wa = wb = wc = (0., 0.); wOn = 0.; hot = 0.
+    if t >= E[3]:
+        wOn = ease((t - E[3] - .04) / .12)
+        wa, wb, wc = V, C1, C2
+    if t >= E[8]:
+        k = outc((t - E[8]) / .14)
+        ang_ = DROT * k; mb = lerp2(MB, BASE, k)
+        wa, wb, wc = add(mb, rot(sub(V, MB), ang_)), add(mb, rot(sub(C1, MB), ang_)), add(mb, rot(sub(C2, MB), ang_))
+        hot = max(0., 1 - (t - E[8]) / .25)
+        for i in range(1, 4):
+            t0 = E[8 + i]
+            if t >= t0:
+                wa = lerp2(TIPS[i - 1], TIPS[i], outc((t - t0) / .11))
+                hot = max(0., 1 - (t - t0) / .25)
+        if t >= E[11] + .11:
+            wa, wb, wc = gaze_tri(gaze_angle(t))
+    # the final look: out of the page, at us — the wedge shortens to a disc
+    discR = 0.; disc = (0., 0.)
+    if t >= X:
+        k = ease((t - X) / .14)
+        th = gaze_angle(t)
+        wa, wb, wc = gaze_tri(th, GL * (1 - k), GW * (1 - k) + .001)
+        disc = mul(dirv(th), IRIS_S * .47)
+        discR = .14 + 3.2 * k * k
+    # stains: where the gaze has rested (pose 0 from the 12th, then one per glance)
+    poses = [TH0] + [math.radians(g[0]) for g in GLANCE]
+    nst = 0
+    for i, c in enumerate(C):
+        if t >= c + .07: nst = i + 1
+    st = [gaze_tri(p) for p in poses]
+    # construction
+    segp = [draw(t, E[3], .26),
+            draw(t, E[2], .12), draw(t, E[2] + .1, .1), draw(t, E[2] + .1, .1), draw(t, E[2] + .2, .12),
+            draw(t, E[0] + .38, .06), draw(t, E[0] + .42, .06), draw(t, E[1] + .38, .06), draw(t, E[1] + .42, .06)]
+    fadeP = 1. - ease((t - E[8]) / .1)
+    segA = [1., 1., fadeP, fadeP, 1., 1., 1., 1., 1.]
+    circ = [draw(t, E[0], .36), draw(t, E[1], .36)]
+    head = (0., 0., 0.)
+    if E[0] <= t < E[0] + .42:
+        k = clamp((t - E[0]) / .36); a0 = math.pi + k * 2 * math.pi
+        head = (R0 * math.cos(a0), R0 * math.sin(a0), 1. - clamp((t - E[0] - .36) / .06))
+    if E[1] <= t < E[1] + .42:
+        k = clamp((t - E[1]) / .36); a0 = -math.pi / 2 + k * 2 * math.pi
+        head = (YOU[0] + R0 * math.cos(a0), R0 * math.sin(a0), 1. - clamp((t - E[1] - .36) / .06))
+    if E[2] <= t < E[2] + .38:
+        k = clamp((t - E[2]) / .32)
+        pts = [TL, C1, V, C2, TR]; f = k * 4; i = min(int(f), 3)
+        p = lerp2(pts[i], pts[i + 1], f - i)
+        head = (p[0], p[1], 1. - clamp((t - E[2] - .32) / .06))
+    if E[3] <= t < E[3] + .32:
+        k = clamp((t - E[3]) / .26); a, b = SEGS[0]
+        p = lerp2(a, b, k); head = (p[0], p[1], 1. - clamp((t - E[3] - .26) / .06))
+    NA_ = 3.6 / .0123 + 1
+    scanA = NA_ * outc((t - E[4]) / .42) if t >= E[4] else 0.
+    NC_ = 2 * R0 / .0123 + 1
+    scanC = NC_ * outc((t - E[5]) / .34) if t >= E[5] else 0.
+    if E[4] <= t < E[4] + .46:
+        r = math.floor(scanA); xf = scanA - r
+        head = (-3. + 4.8 * xf, 1.8 - (r + .5) * .0123, .8)
+    if E[5] <= t < E[5] + .38:
+        r = math.floor(scanC); xf = scanC - r
+        head = (-R0 + 2 * R0 * xf, R0 - (r + .5) * .0123, .8)
+    scanB = outc((t - E[6]) / .3) if t >= E[6] else 0.
+    n = int(len(INSC) * clamp((t - C[0]) / (C[5] + .15 - C[0])))
+    insX = INSC_EDGES[n - 1] if n > 0 else 0.
+    return dict(u_clk=t, u_red=clamp(1. - .7 * ease((t - E[0] - .15) / .5) - .3 * ease((t - E[1]) / .4)),
+                u_garb=1. - .35 * ease((t - E[4]) / .5),
+                u_zoom=zoom, u_ang=an, u_ctr=ctr, u_shake=(sx, sy),
+                u_seg=segp, u_segA=segA, u_circ=circ,
+                u_heartFill=ease((t - E[2] - .25) / .2) * (1. - ease((t - E[3] - .15) / .45)),
+                u_heartCol=1. - ease((t - E[3] - .1) / .5),
+                u_tick=draw(t, E[3] + .12, .3), u_target=draw(t, E[8], .1) * (1. - ease((t - E[11]) / .1)),
+                u_head=head, u_scanA=scanA, u_scanC=scanC, u_scanB=scanB, u_wordA=(t - E[7]) if t >= E[7] else -1.,
+                u_ecg=draw(t, E[6] + .05, .3),
+                u_wa=wa, u_wb=wb, u_wc=wc, u_wOn=wOn, u_blood=ease((t - E[11] - .05) / .3), u_hot=hot * (1. - ease((t - E[11]) / .1)),
+                u_irisRed=ease((t - E[11] - .1) / .4),
+                u_sa=[s[0] for s in st], u_sb=[s[1] for s in st], u_sc=[s[2] for s in st], u_nst=float(nst),
+                u_num=[(t - c - .05) if t >= c + .05 else -1. for c in C], u_you=outc((t - C[5] - .06) / .3) if t >= C[5] else 0.,
+                u_insX=insX, u_loveB=ease((t - C[5]) / .25), u_insFade=ease((t - C[5] - .22) / .15), u_fear=ease((t - C[5] - .25) / .08),
+                u_disc=disc, u_discR=discR,
+                u_black=1. if t >= X + .36 else 0.,
+                u_iris=(ix, iy), u_gapA=gapA, u_lid=1., u_pupil=.22)
+
+
+_G = {}
+
+
+def textures(t, w, h):
+    if 'g' not in _G: _G['g'] = T7.atlas()
+    return {'u_glyphs': _G['g'], 'u_nums': ATLAS, 'u_word': WORD_IMG, 'u_insc': INSC_IMG}

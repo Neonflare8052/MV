@@ -1,0 +1,23 @@
+{
+  "source_start": 33.4,
+  "source_end": 40.7,
+  "fps": 60,
+  "frames": 438,
+  "duration": 7.3,
+  "size": [
+    1920,
+    1080
+  ],
+  "elapsed": 10.078999999997905,
+  "subframes": 4,
+  "design": "Curved entrance and flight, non-uniform half orbit, continuous concentric-ring unrolling into depth-staggered sine strands, then tangent support.",
+  "action_times": {
+    "catch": 34.58,
+    "release": 36.287,
+    "vector_ring_exit": 37.06666666666666,
+    "unroll_start": 37.1,
+    "unroll_end": 38.55,
+    "landing": 38.93
+  },
+  "implementation": "Original angular-order ring-to-wave mapping restored; persistent point identity; curved per-strand motion and a continuous Bezier camera arc."
+}

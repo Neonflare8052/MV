@@ -1,0 +1,894 @@
+"""s06 (tech ladder sample) · the same room, rendered by three generations of graphics, one per guess:
+  74.045 eggplant  1984: a 1-bit desktop (50 % grey pattern), a striped title bar; the room dithered to black and white
+  77.576 tomato    c. 2000, before shaders: a teal desktop, bevelled grey windows, a text-mode window for the notes; the
+                   room low-poly, vertex-lit, a coarse baked light map, blob shadows, a glow sprite, the window's light a
+                   flat quad on the floor; 16-bit colour
+  81.351 cat       now: the room modelled (foliage, skirting, window frame and sill, lamp base) and lit — the lamp and the
+                   moon with soft shadows, ambient occlusion, a glossy floor — at full resolution; a recorder draws the purr
+  84.540           the window centres, its chrome goes, and the picture is swallowed (then t02's ray tracing)
+Each change is a raster wipe from the top. The sandbox's outline (0:02.92) is drawn over all of it, modern, unchanged.
+Everything else as in film/shots/s06_sandbox.py:
+
+s06 · 1:14.045–1:25.5  the sandbox: it builds a little world to guess what you are.
+A render window opens on a cozy cartoon room; a question-mark box drops in. Bubbles guess eggplant, tomato,
+cat (awake/asleep); outside the window the terminal annotates each guess in ASCII (nutrition table, lycopene,
+purr waveform). ENJOYMENT: meow. The window centres, the camera looks straight down at the box, and the whole
+frame unfolds along the box's creases like a box net; the flaps rise around us — we are inside the box. Black."""
+import math
+from PIL import Image, ImageDraw, ImageFont
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec4 u_win;           // window rect in uv (x0,y0,x1,y1), y up
+uniform vec3 u_cam, u_look; uniform float u_fov;
+uniform float u_boxY, u_squash, u_wob, u_meow;
+uniform float u_unfold;       // 0 flat .. 1 flaps upright (we are inside)
+uniform float u_corner;       // corners fall away
+uniform float u_dark;
+uniform float u_crack;        // the lid opens a crack
+uniform float u_shrink, u_dot; // the whole frame collapses to a point
+uniform sampler2D u_ui, u_top;
+uniform float u_zoomOut;                 // >1: a wider view (the backdrop captured for t02)
+uniform float u_lensK, u_soap;           // the hole opening out of the box: 0..1; how much it still behaves like soap
+uniform float u_eraA, u_eraB, u_wipe;   // 0 black, 4 1-bit, 5 c. 2000 fake light, 6 modelled & lit, 7 now; B above the wipe line
+out vec4 fragColor;
+#define PI 3.14159265
+float ERA;
+bool FACET, FAKE, FINE, OCC=false;   // OCC: shadow rays see only the objects, not the floor and walls
+//   // low-poly facets; c. 2000 fake light (tomato); modelled and lit (cat, now)
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float sdBox(vec3 p, vec3 b){ vec3 q=abs(p)-b; return length(max(q,0.))+min(max(q.x,max(q.y,q.z)),0.); }
+float sdRBox(vec3 p, vec3 b, float r){ return sdBox(p,b-r)-r; }
+vec2 opU(vec2 a, vec2 b){ return a.x<b.x?a:b; }
+vec3 boxLocal(vec3 p){
+  p.y-=u_boxY;
+  float c=cos(u_wob), s=sin(u_wob); p.xy=mat2(c,s,-s,c)*p.xy;
+  p.y/=u_squash; p.xz*=sqrt(u_squash);
+  return p;
+}
+vec2 map(vec3 p){
+  vec2 r=vec2(1e3,0.);
+  if(!OCC){
+    r=vec2(p.y,1.);                                               // floor
+    r=opU(r,vec2(-(p.z+1.6)*-1.,2.));                             // back wall z=-1.6
+    r=opU(r,vec2(p.x+2.2,2.5));                                   // left wall
+    r=opU(r,vec2(max(length(p.xz-vec2(0.,.1))-.95,p.y-.004),3.));// rug
+  }
+  // floor lamp and a potted plant
+  if(!OCC){                                                       // (the lamp casts no shadow of its own light)
+    r=opU(r,vec2(max(length(p.xz-vec2(1.35,-1.1))-.02,max(p.y-.95,-p.y)),4.));
+    vec3 sh=p-vec3(1.35,1.0,-1.1); float cone=max(length(sh.xz)-(.18-sh.y*.35),abs(sh.y)-.13);
+    r=opU(r,vec2(cone,5.));
+  }
+  r=opU(r,vec2(sdRBox(p-vec3(-1.35,.16,-1.15),vec3(.16,.16,.16),.04),6.));
+  if(FINE){
+    // foliage: a cluster of lumps with a little noise, instead of one ball
+    vec3 fp=p-vec3(-1.35,.55,-1.15);
+    float fo=length(fp)-.24;
+    fo=min(fo,length(fp-vec3(.16,.08,.05))-.17); fo=min(fo,length(fp-vec3(-.15,.1,-.03))-.16);
+    fo=min(fo,length(fp-vec3(.02,.2,.1))-.15); fo=min(fo,length(fp-vec3(-.04,-.02,.18))-.15);
+    fo+=.018*(vn(fp.xy*18.+fp.z*7.)-.5)+.012*(vn(fp.zy*31.)-.5);
+    r=opU(r,vec2(fo*.8,7.));
+    vec3 rp=p-vec3(-1.35,.32,-1.15); r=opU(r,vec2(length(vec2(length(rp.xz)-.17,rp.y))-.025,6.));   // the pot's rim
+    // trim: skirting boards, the window's frame and sill
+    if(!OCC) r=opU(r,vec2(sdBox(p-vec3(0.,.045,-1.585),vec3(3.,.045,.015)),2.6));
+    r=opU(r,vec2(sdBox(p-vec3(-2.185,.045,0.),vec3(.015,.045,3.)),2.6));
+    vec3 wp=p-vec3(-.5,1.25,-1.6);
+    float fr=max(sdBox(wp,vec3(.47,.37,.025)),-sdBox(wp,vec3(.42,.32,.1)));
+    fr=min(fr,sdBox(wp,vec3(.012,.32,.018)));
+    r=opU(r,vec2(fr,2.6));
+    r=opU(r,vec2(sdRBox(p-vec3(-.5,.87,-1.56),vec3(.52,.018,.05),.006),2.6));
+    // the lamp's base
+    if(!OCC) r=opU(r,vec2(max(length(p.xz-vec2(1.35,-1.1))-.14,abs(p.y-.012)-.012)-.004,4.));
+  } else {
+    r=opU(r,vec2(length(p-vec3(-1.35,.55,-1.15))-.3,7.));
+  }
+  // the box
+  vec3 q=boxLocal(p);
+  float b=sdRBox(q-vec3(0.,.17,0.),vec3(.175,.17,.175),.012);          // the body, open at the top (painted dark)
+  r=opU(r,vec2(b,8.));
+  for(int k=0;k<2;k++){                                               // two lid flaps, hinged at the outer edges
+    float sg=k==0?-1.:1.;
+    vec3 f=q-vec3(sg*.175,.34,0.);
+    vec2 dA=vec2(-sg*cos(u_crack),sin(u_crack)), nA=vec2(sg*sin(u_crack),cos(u_crack));
+    float al=dot(f.xy,dA), nr=dot(f.xy,nA);
+    r=opU(r,vec2(sdBox(vec3(al-.0875,nr-.006,f.z),vec3(.0875,.006,.176)),8.));
+  }
+  return r;
+}
+vec3 normal(vec3 p){ vec2 e=vec2(.001,0.);
+  return normalize(vec3(map(p+e.xyy).x-map(p-e.xyy).x,map(p+e.yxy).x-map(p-e.yxy).x,map(p+e.yyx).x-map(p-e.yyx).x)); }
+float softShadow(vec3 ro, vec3 rd, float maxt){
+  OCC=true;
+  float res=1., t=.02;
+  for(int i=0;i<40;i++){ float h=map(ro+rd*t).x; res=min(res,9.*h/t); t+=clamp(h,.006,.12); if(res<.01||t>maxt) break; }
+  OCC=false;
+  return clamp(res,0.,1.);
+}
+float ao(vec3 p, vec3 n){
+  float o=0., w=1.;
+  for(int i=1;i<6;i++){ float d=.035*float(i); o+=w*(d-map(p+n*d).x); w*=.6; }
+  return clamp(1.-o*3.2,0.,1.);
+}
+vec3 toon(vec3 p, vec3 rd, float m, float edge){
+  vec3 n=normal(p);
+  if(FACET) n=normalize(floor(n*2.2+.5)+n*1e-3);                  // low poly: the normals come in facets
+  vec3 lamp=vec3(1.35,.95,-1.0); vec3 L=normalize(lamp-p);
+  float d=max(dot(n,L),0.);
+  float band=d>.6?1.:(d>.25?.72:.45);                             // cel bands
+  if(FACET) band=.32+.78*d;                                       // smooth (Gouraud-like) shading, no ink
+  vec3 alb=vec3(.5);
+  if(m<1.5){ float pl=step(.5,fract(p.x*3.)); alb=mix(vec3(.62,.42,.26),vec3(.56,.37,.22),pl)*(.9+.1*vn(p.xz*vec2(2.,20.))); }
+  else if(m<2.2){ alb=vec3(.93,.86,.72)*(.94+.06*step(.5,fract(p.x*6.)));
+    vec2 w=p.xy-vec2(-.5,1.25); if(abs(w.x)<.42&&abs(w.y)<.32){ alb=vec3(.16,.2,.38); if(length(w-vec2(.18,.12))<.07) alb=vec3(1.,.96,.8); }
+    if(abs(w.x)<.46&&abs(w.y)<.36&&(abs(w.x)>.42||abs(w.y)>.32||abs(w.x)<.012)) alb=vec3(.95,.92,.86); }
+  else if(m<2.7){ alb=vec3(.88,.8,.66); }
+  else if(m<3.5){ alb=vec3(.72,.3,.22)*(.9+.1*step(.5,fract(length(p.xz)*9.))); }
+  else if(m<4.5){ alb=vec3(.2,.16,.14); }
+  else if(m<5.5){ return vec3(1.25,.95,.6); }
+  else if(m<6.5){ alb=vec3(.78,.44,.3); }
+  else if(m<7.5){ alb=vec3(.36,.6,.32); }
+  else {
+    vec3 q=boxLocal(p);
+    alb=vec3(.84,.62,.38);
+    if(abs(q.x)<.03&&q.y>.33) alb=vec3(.9,.82,.6);                // tape
+    if(n.y>.8&&q.y<.343&&abs(q.x)<.16&&abs(q.z)<.16) return vec3(.0);   // inside the box: dark
+    if(n.z>.6){                                                   // question mark on the front
+      vec2 u=(q.xy-vec2(0.,.19))/.1;
+      float a=abs(length(u-vec2(0.,.3))-.3); a=max(a,-(u.y-.3)*step(u.x,0.)*1.);
+      float qm=min(max(a,-(u.y+.02)+step(0.,u.x)*0.),length(u-vec2(0.,-.55))-.08);
+      qm=min(qm,max(abs(u.x)-.06,max(u.y-.02,-u.y-.3)));
+      alb=mix(vec3(.3,.2,.12),alb,smoothstep(.04,.07,qm));
+    }
+  }
+  if(FINE){
+    if(m<1.5){ float pk=floor(p.x*3.); float pz=floor(p.z*1.2+h12(vec2(pk,1.))*3.);
+      alb=mix(vec3(.6,.4,.24),vec3(.52,.34,.2),h12(vec2(pk,pz)))*(.86+.14*vn(vec2(p.x*3.,p.z*40.)+pk*7.))*(.97+.03*step(.02,fract(p.x*3.))); }
+    else if(m>2.8&&m<3.5){ alb*=.92+.08*vn(p.xz*90.); }
+    else if(m>7.5&&abs(boxLocal(p).x)>.03){ alb*=.93+.07*vn(boxLocal(p).xy*vec2(140.,8.)); }
+    else if(m>2.5&&m<2.7) alb=vec3(.95,.93,.88);
+    else if(m>6.5&&m<7.5) alb=mix(vec3(.24,.46,.22),vec3(.42,.66,.34),vn(p.xy*14.+p.z*5.));
+  }
+  vec3 col;
+  if(FINE){                                                      // modelled light: the lamp, the moon, the room's bounce
+    vec3 Lp=vec3(1.35,.83,-1.1)-p;   /* the bulb, just under the shade */ float dl=length(Lp); vec3 L1=Lp/dl;
+    float k1=max(dot(n,L1),0.)*softShadow(p+n*.004,L1,dl-.03)*2.1/(1.+dl*dl*.45)*(p.y>.86?.25:1.);
+    vec3 L2=normalize(vec3(-.5,1.25,-1.6)-p);
+    float k2=max(dot(n,L2),0.)*softShadow(p+n*.004,L2,2.)*.32;
+    float occ=ao(p,n);
+    vec3 amb=mix(vec3(.16,.13,.11),vec3(.13,.15,.2),.5+.5*n.y)*occ;
+    col=alb*(k1*vec3(1.,.8,.58)+k2*vec3(.5,.6,.85)+amb*1.4);
+    float gl=m<1.5?.35:(m>7.5?.04:.08);
+    col+=vec3(1.,.85,.65)*gl*pow(max(dot(n,normalize(L1-rd)),0.),m<1.5?60.:20.)*k1;
+    return col;
+  }
+  if(FAKE){                                                      // c. 2000: vertex light, a baked light map, blob shadows
+    vec2 g=p.xz/.16, gi=floor(g), gf=fract(g);                     // the light map: coarse texels, bilinear between them
+    vec2 lc=vec2(1.35,-1.05);
+    float l00=exp(-dot(gi*.16-lc,gi*.16-lc)*.9), l10=exp(-dot((gi+vec2(1,0))*.16-lc,(gi+vec2(1,0))*.16-lc)*.9);
+    float l01=exp(-dot((gi+vec2(0,1))*.16-lc,(gi+vec2(0,1))*.16-lc)*.9), l11=exp(-dot((gi+1.)*.16-lc,(gi+1.)*.16-lc)*.9);
+    float lm=mix(mix(l00,l10,gf.x),mix(l01,l11,gf.x),gf.y);
+    float flo=step(p.y,.02);
+    float blob=1.;
+    if(flo>0.){
+      blob*=1.-.72*exp(-dot(p.xz,p.xz)/.06);
+      blob*=1.-.65*exp(-dot(p.xz-vec2(-1.35,-1.15),p.xz-vec2(-1.35,-1.15))/.08);
+      blob*=1.-.4*exp(-dot(p.xz-vec2(1.35,-1.1),p.xz-vec2(1.35,-1.1))/.02);
+      float zz=p.z+1.6, xs=p.x+.5+zz*.35;                            // the window's light: a flat quad laid on the floor
+      if(zz<1.25&&abs(xs)<.42) lm+=.6*smoothstep(1.25,.5,zz);
+    }
+    col=alb*(.4+.5*band+1.05*lm*flo+.35*lm*(1.-flo)*step(abs(p.z+1.6),.01))*blob*vec3(1.,.93,.84);
+    return col;
+  }
+  col=alb*(band*vec3(1.,.9,.75)*1.05+vec3(.3,.32,.42)*.35);
+  col*=1.-.75*edge*(FACET?0.:1.);                                // ink outline
+  return col;
+}
+vec3 cartoon(vec2 wuv){          // wuv: -1..1 inside the window (y up), aspect from the window
+  vec3 fw=normalize(u_look-u_cam), rt=normalize(cross(fw,vec3(0,1,0))+vec3(0.,0.,1e-5)), up=cross(rt,fw);
+  if(abs(fw.y)>.98){ rt=vec3(1.,0.,0.); up=vec3(0.,0.,-1.); }
+  vec3 rd=normalize(fw+(wuv.x*rt+wuv.y*up)*tan(u_fov*.5)*u_zoomOut);
+  vec3 ro=u_cam; float t=0.; vec2 h; float mn=1e3, tprev=0.;
+  for(int i=0;i<120;i++){ h=map(ro+rd*t); if(h.x<.0008||t>12.) break; mn=min(mn,h.x/max(t,.3)); t+=h.x; }
+  float edge=1.-smoothstep(.0,.012,mn);
+  vec3 col=t>12.?vec3(.1,.08,.07):toon(ro+rd*t,rd,h.y,edge*step(.02,mn));
+  if(FAKE){                                                      // a glow sprite pasted over the lamp, ignoring depth
+    vec3 sd=normalize(vec3(1.35,1.0,-1.1)-ro);
+    float ang=acos(clamp(dot(rd,sd),-1.,1.));
+    col+=vec3(1.,.85,.55)*(.55*exp(-ang*22.)+.25*exp(-ang*7.));
+  }
+  return col;
+}
+vec3 frameAt(vec2 sv){               // the whole frame at screen-uv sv (0..1)
+  vec3 col=vec3(.008);
+  if(sv.x>u_win.x&&sv.x<u_win.z&&sv.y>u_win.y&&sv.y<u_win.w){
+    vec2 c=(u_win.xy+u_win.zw)*.5, hs=(u_win.zw-u_win.xy)*.5;
+    vec2 wuv=(sv-c)/hs; wuv.x*=hs.x*u_res.x/(hs.y*u_res.y);
+    col=cartoon(wuv);
+  }
+  vec4 ui=textureLod(u_ui,sv,0.);
+  return mix(col,ui.rgb,ui.a);
+}
+// ---- the old screens are composed in display values, quantised, then handed back to the film's display transform ----
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
+vec3 disp(vec3 c){ return pow(aces(c*1.05),vec3(1./2.2)); }
+vec3 undisp(vec3 v, vec2 sv){
+  vec3 x=pow(clamp(v,0.,.985),vec3(2.2));
+  vec3 a=2.51-2.43*x, b=.03-.59*x, c=-.14*x;
+  vec3 y=(-b+sqrt(b*b-4.*a*c))/(2.*a);
+  vec2 d=sv-.5; return y/1.05/(1.-.9*dot(d,d));
+}
+float bayer4(vec2 c){
+  int x=int(mod(c.x,4.)), y=int(mod(c.y,4.));
+  int m[16]=int[16](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
+  return (float(m[y*4+x])+.5)/16.;
+}
+vec3 desktop(vec2 cell, vec2 sp){
+  if(ERA<4.5) return mod(cell.x+cell.y,2.)<1.?vec3(.96,.96,.93):vec3(.03);     // the 50 % grey pattern
+  if(ERA<5.5) return vec3(0.,.5,.5);                                           // teal
+  // glass era: a blue gradient wallpaper with two soft swathes of light
+  vec3 c=mix(vec3(.06,.26,.52),vec3(.32,.6,.84),sp.y*.8+sp.x*.2);
+  float s1=exp(-pow((sp.y-.62+.35*(sp.x-.5)+.05*sin(sp.x*5.))/.07,2.));
+  float s2=exp(-pow((sp.y-.42+.5*(sp.x-.6)+.04*sin(sp.x*7.+1.))/.035,2.));
+  return c+vec3(.35,.55,.7)*(s1*.35+s2*.25)*smoothstep(.0,.6,sp.x);
+}
+vec3 oldScreen(vec2 sv, vec2 outSv, float asp){
+  float vh=ERA<4.5?360.:(ERA<5.5?540.:u_res.y);
+  vec2 vres=vec2(floor(vh*asp+.5),vh);
+  vec2 cell=floor(sv*vres), sp=(cell+.5)/vres;
+  vec3 v=desktop(cell,sp);
+  if((sp.x>u_win.x&&sp.x<u_win.z&&sp.y>u_win.y&&sp.y<u_win.w)||u_lensK>0.){   // (while the hole opens, the room goes on past the frame)
+    vec2 c=(u_win.xy+u_win.zw)*.5, hs=(u_win.zw-u_win.xy)*.5;
+    vec2 wuv=(sp-c)/hs; wuv.x*=hs.x*u_res.x/(hs.y*u_res.y);
+    v=disp(cartoon(wuv));
+  }
+  vec4 ui=textureLod(u_ui,sp,0.);
+  v=mix(v,ui.rgb,ui.a);
+  float b=bayer4(cell);
+  if(ERA<4.5){                                                                 // 1 bit
+    float l=clamp((dot(v,vec3(.3,.59,.11))-.36)*1.9,0.,1.);
+    v=l>b?vec3(.96,.96,.93):vec3(.03);
+  } else if(ERA<5.5) v=floor(v*31.+b)/31.;                                    // 16-bit colour, ordered dither
+  // (the cat: full resolution, full colour)
+  return undisp(v,outSv);
+}
+void main(){
+  vec2 sv=gl_FragCoord.xy/u_res;
+  float asp=u_res.x/u_res.y;
+  vec3 col=vec3(0.);
+  ERA=(1.-sv.y)<u_wipe?u_eraB:u_eraA;
+  FAKE=ERA>4.5&&ERA<5.5; FINE=ERA>5.5; FACET=FAKE;
+  if(ERA<.5){ fragColor=vec4(0.,0.,0.,u_weight); return; }
+  if(ERA<5.5){
+    col=oldScreen(sv,sv,asp);
+    vec4 tp=texture(u_top,sv); col=mix(col,tp.rgb,tp.a);
+    fragColor=vec4(col*u_weight,1.); return;
+  }
+  // the cat, and now. At the end the hole opens out of the box like soap on a greasy film: the picture is not covered but
+  // pushed — by the point lens equation, beta = theta - thetaE^2/theta, the black disc growing to the shadow t02 has —
+  // its front ragged and drawn out along the slit at first, a little thin-film colour at the rim
+  vec2 v=(sv-.5)*vec2(asp,1.);
+  float r=length(v), th=atan(v.y,v.x);
+  vec2 src=sv; bool hole=false; float rim=0.;
+  if(u_lensK>0.){
+    float k=u_lensK;
+    float Rb=.34*k, tE=.6*k;                                     // t02's shadow and Einstein ring, measured
+    float ragged=1.+u_soap*(.22*(vn(vec2(th*2.2,u_time*1.5))-.5)+.1*(vn(vec2(th*7.,u_time*3.))-.5));
+    float stretch=1.+2.6*u_soap*u_soap;                          // drawn out along the slit (vertical) at first
+    float re=length(vec2(v.x,v.y/stretch))/ragged;
+    if(re<Rb) hole=true;
+    else{
+      float beta=r-tE*tE/max(r,1e-4);
+      vec2 dir=v/max(r,1e-4);
+      vec2 q=dir*beta;                                            // beta < 0: the second, flipped image
+      src=q/vec2(asp,1.)+.5;
+      rim=(re-Rb)/max(.025+.06*u_soap,1e-3);
+    }
+  }
+  if(hole) col=vec3(0.);
+  else{
+    col=oldScreen(src,sv,asp);
+    if(rim<1.&&u_lensK>0.){                                      // soap film colours, thinning at the rim
+      float hh=rim*1.6+.6*vn(vec2(th*4.,u_time*2.));
+      vec3 film=.5+.5*cos(6.2832*(hh+vec3(0.,.33,.67)));
+      col=mix(col,col*.6+film*.55,(1.-rim)*(.25+.35*u_soap));
+    }
+  }
+  vec4 tp=texture(u_top,sv); col=mix(col,tp.rgb,tp.a);
+  col*=1.-u_dark;
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.35, u_ca=.004)
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+T0, T_EGG, T_NUT, T_TOM, T_ANTI, T_CAT, T_PURR, T_ENJ = 74.045, 75.422, 76.959, 77.576, 80.620, 81.351, 82.833, 84.268
+T_CENTER, T_TOP, T_CRACK, T_SHRINK, T_END = 84.540, 84.66, 84.98, 85.236, 85.5
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, x): return tuple(p + (q - p) * x for p, q in zip(a, b))
+
+
+def backout(x, s=1.4):
+    x = clamp(x) - 1; return x * x * ((s + 1) * x + s) + 1
+
+
+RIGHT = (.44, .13, .94, .85)
+LEFT = (.05, .13, .55, .85)
+MID = (0., 0., 1., 1.)                               # maximised: the window becomes the screen
+T_BUMP = T_CAT + .2                                   # the window overshoots into the sandbox wall
+
+
+def win_rect(t):
+    """window rect in uv, y up (x0, y0, x1, y1): right (eggplant) → left (tomato) → right, into the wall (cat) → centre"""
+    r = RIGHT
+    r = lerp(r, LEFT, backout((t - T_TOM) / .34, 1.1))
+    r = lerp(r, RIGHT, backout((t - T_CAT) / .36, 2.3))
+    r = lerp(r, MID, ease((t - T_CENTER) / .32))
+    k = backout((t - T0) / .35)                       # the window opens with a small overshoot
+    cx, cy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
+    hw, hh = (r[2] - r[0]) / 2 * k, (r[3] - r[1]) / 2 * k
+    return (cx - hw, cy - hh, cx + hw, cy + hh)
+
+
+T_PUSH = 85.078                                       # If I'm the only god: the hole opens
+import os
+CAPTURE = bool(os.environ.get('T13_CAPTURE'))         # render the room un-lensed (the backdrop t02 bends)
+
+
+def lens_k(t):
+    if CAPTURE: return 0.
+    x = clamp((t - T_PUSH) / .42)
+    return (1 - math.exp(-5.5 * x)) / (1 - math.exp(-5.5))
+
+
+WIPES = [(T0, 0, 4, .12), (T_TOM, 4, 5, .14), (T_CAT, 5, 6, .14)]   # (start, from, to, duration)
+
+
+def eras(t):
+    """(era above the wipe line, era below, wipe 0..1 from the top)"""
+    a, b, w = 0, 4, 0.
+    for t0, ea, eb, du in WIPES:
+        if t >= t0: a, b, w = ea, eb, clamp((t - t0) / du)
+    return (b, b, 1.) if w >= 1 else (a, b, w)
+
+
+def params(t):
+    ea, eb, wp = eras(t)
+    now = eb if wp > .5 else ea
+    POST.update(dict(u_bloom=.05, u_grain=.012, u_ca=0.) if 3 < now < 6 else (dict(u_bloom=.045, u_grain=.02, u_ca=0.) if now == 6 else dict(u_bloom=.3, u_grain=.03, u_ca=.003)))
+    fall = clamp((t - T0 - .15) / .45)
+    boxY = 2.4 * (1 - fall * fall)
+    land = t - (T0 + .6)
+    squash = 1 - .28 * math.exp(-land * 9) * math.cos(land * 26) * (land > 0) if land > 0 else 1.15
+    wob = .06 * math.sin((t - T_CAT) * 9) * math.exp(-max(t - T_CAT - 1.5, 0)) * (t > T_CAT)
+    wob += .05 * math.sin((t - T_ENJ) * 30) * math.exp(-(t - T_ENJ) * 6) * (t > T_ENJ)
+    if t >= T_ENJ + .12: wob = 0.                     # the whole picture freezes on ENJOYMENT
+    cam = (0., 1.05, 2.7); look = (0., .32, 0.); fov = 42
+    x = ease((t - T_TOP) / .34)
+    cam = lerp(cam, (0., 1.65, .001), x); look = lerp(look, (0., 0., 0.), x); fov = 42 + 6 * x
+    return dict(u_win=win_rect(t), u_cam=cam, u_look=look, u_fov=math.radians(fov), u_boxY=boxY, u_squash=squash, u_wob=wob,
+                u_crack=math.radians(16) * outc((t - T_CRACK) / .26),
+                u_shrink=0., u_dot=0., u_lensK=lens_k(t), u_soap=1 - lens_k(t), u_zoomOut=2. if CAPTURE else 1.,
+                u_dark=0., u_eraA=float(ea), u_eraB=float(eb), u_wipe=wp)
+
+
+# ---------------- 2D: window chrome, bubbles, ASCII annotations ----------------
+def big_ascii(word, cols_per=6):
+    """block letters made of characters"""
+    f = ImageFont.truetype('C:/Windows/Fonts/consolab.ttf', 14)
+    im = Image.new('L', (len(word) * 9 + 4, 16), 0); ImageDraw.Draw(im).text((1, -1), word, font=f, fill=255)
+    rows = []
+    for y in range(im.height):
+        rows.append(''.join('#' if im.getpixel((x, y)) > 110 else ' ' for x in range(im.width)))
+    return [r for r in rows if r.strip()] or rows
+
+
+EGG = big_ascii('EGGPLANT'); TOM = big_ascii('TOMATO'); CAT = big_ascii('CAT')
+NUTR = ['healthy.', '-----------------------------', 'per 100 g        eggplant, raw', 'energy                 25 kcal',
+        'water                   92.3 g', 'carbohydrate            5.9 g', '  fibre                 3.0 g',
+        'protein                 1.0 g', 'fat                     0.2 g', 'potassium             229 mg', 'nasunin (in the skin)     yes']
+LYCO = ['antioxidant: lycopene   C40H56', '',
+        '      |     |     |     |     |     |     |     |',
+        '  __/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\__',
+        ' /    |     |     |     |     |     |     |     |  \\',
+        '', '11 conjugated C=C · red because it absorbs blue-green']
+_F = {}
+F_SYS, F_UI, F_MONO = 'C:/Windows/Fonts/tahomabd.ttf', 'C:/Windows/Fonts/micross.ttf', 'C:/Windows/Fonts/lucon.ttf'
+F_COMIC, F_BOLD = 'C:/Windows/Fonts/comicbd.ttf', 'C:/Windows/Fonts/segoeuib.ttf'
+BK, WH, G192, G128, G223 = (0, 0, 0, 255), (255, 255, 255, 255), (192, 192, 192, 255), (128, 128, 128, 255), (223, 223, 223, 255)
+
+
+def font(path, size):
+    k = (path, max(6, int(round(size))))
+    if k not in _F: _F[k] = ImageFont.truetype(path, k[1])
+    return _F[k]
+
+
+def vres(era, w, h):
+    vh = 360 if era == 4 else (540 if era == 5 else h)
+    return int(round(vh * w / h)), vh
+
+
+def bevel(d, box, raised=True):
+    x0, y0, x1, y1 = box
+    lt, rb = (WH, BK) if raised else (G128, WH)
+    d.line((x0, y1, x0, y0, x1, y0), fill=lt); d.line((x0, y1, x1, y1, x1, y0), fill=rb)
+    lt2, rb2 = (G223, G128) if raised else (BK, G223)
+    d.line((x0 + 1, y1 - 1, x0 + 1, y0 + 1, x1 - 1, y0 + 1), fill=lt2); d.line((x0 + 1, y1 - 1, x1 - 1, y1 - 1, x1 - 1, y0 + 1), fill=rb2)
+
+
+def chrome(d, era, X0, Y0, X1, Y1, title, sc, content=None):
+    """a window of its time round the content box (X0..Y1, virtual pixels); returns the title bar height"""
+    X0, Y0, X1, Y1 = int(X0), int(Y0), int(X1), int(Y1)
+    if era == 4:                                                    # 1984: striped title bar, close box, 1-px shadow
+        ht = max(11, int(round(36 * sc)))
+        d.rectangle((X0 - 1, Y0 - ht, X1 + 1, Y1 + 1), outline=BK, fill=WH)
+        d.line((X0, Y0 - 1, X1, Y0 - 1), fill=BK)
+        for yy in range(Y0 - ht + 3, Y0 - 2, 2): d.line((X0 + 2, yy, X1 - 2, yy), fill=BK)
+        cb = ht - 7; cx, cy = X0 + 8, Y0 - ht + 3
+        d.rectangle((cx - 2, cy - 1, cx + cb + 2, cy + cb + 1), fill=WH); d.rectangle((cx, cy, cx + cb, cy + cb), outline=BK)
+        f = font(F_SYS, ht - 2); tw = d.textlength(title, font=f); tx = (X0 + X1 - tw) / 2
+        d.rectangle((tx - 6, Y0 - ht + 2, tx + tw + 6, Y0 - 2), fill=WH)
+        d.text((tx, Y0 - ht + 1), title, font=f, fill=BK)
+        d.line((X0 + 1, Y1 + 2, X1 + 2, Y1 + 2), fill=BK); d.line((X1 + 2, Y0 - ht + 1, X1 + 2, Y1 + 2), fill=BK)
+    else:                                                           # the 90s: bevelled grey, a blue title bar, three buttons
+        ht = max(13, int(round(34 * sc)))
+        out = (X0 - 4, Y0 - ht - 5, X1 + 4, Y1 + 4)
+        d.rectangle(out, fill=G192); bevel(d, out)
+        tb = (X0 - 1, Y0 - ht - 2, X1 + 1, Y0 - 3)
+        if era == 5: d.rectangle(tb, fill=(0, 0, 128, 255))
+        else:
+            for x in range(tb[0], tb[2] + 1):
+                k = (x - tb[0]) / max(1, tb[2] - tb[0])
+                d.line((x, tb[1], x, tb[3]), fill=(int(16 * k), int(132 * k), int(128 + 80 * k), 255))
+        d.text((X0 + 4, Y0 - ht - 2 + 1), title, font=font(F_SYS, ht * .72), fill=WH)
+        bw = ht - 5
+        for i, g in enumerate(('x', 'o', '_')):
+            bx1 = X1 - 2 - i * (bw + 2) - (2 if i else 0); bx0 = bx1 - bw - 2; by0, by1 = Y0 - ht, Y0 - 5
+            d.rectangle((bx0, by0, bx1, by1), fill=G192); bevel(d, (bx0, by0, bx1, by1))
+            cx, cy, r = (bx0 + bx1) // 2, (by0 + by1) // 2, max(2, bw // 4)
+            if g == 'x': d.line((cx - r, cy - r, cx + r, cy + r), fill=BK, width=2); d.line((cx - r, cy + r, cx + r, cy - r), fill=BK, width=2)
+            elif g == 'o': d.rectangle((cx - r, cy - r, cx + r, cy + r), outline=BK); d.line((cx - r, cy - r + 1, cx + r, cy - r + 1), fill=BK)
+            else: d.line((cx - r, cy + r, cx + r - 1, cy + r), fill=BK, width=2)
+        bevel(d, (X0 - 1, Y0 - 1, X1 + 1, Y1 + 1), raised=False)
+    d.rectangle((X0, Y0, X1, Y1), fill=content if content else (0, 0, 0, 0))
+    return ht
+
+
+def dotted(d, box, col):
+    x0, y0, x1, y1 = map(int, box)
+    for x in range(x0, x1, 2): d.point((x, y0), fill=col); d.point((x, y1), fill=col)
+    for y in range(y0, y1, 2): d.point((x0, y), fill=col); d.point((x1, y), fill=col)
+
+
+def bitmap(d, rows, n, x, y, bs, col):
+    """block letters from big_ascii, one block per '#'"""
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row[:n]):
+            if ch == '#': d.rectangle((x + c * bs, y + r * bs, x + c * bs + bs - 1, y + r * bs + bs - 1), fill=col)
+
+
+def bubble_art(d, t, bx, by, br, sc, a, era):
+    """the guess bubbles, drawn as in s06 at this scale"""
+    lw = max(1, int(round(3 * sc)))
+    ink = (40, 34, 30, a) if era != 4 else BK
+    def bubble():
+        d.ellipse((bx - br, by - br * .8, bx + br, by + br * .8), fill=(250, 246, 236, a), outline=ink, width=lw)
+        d.ellipse((bx - br * .9, by + br * .75, bx - br * .7, by + br * .95), fill=(250, 246, 236, a), outline=ink, width=lw)
+    q = font(F_SYS if era == 4 else F_BOLD, 34 * sc)
+    S = sc
+    if T_EGG + .1 <= t < T_TOM:
+        bubble()
+        d.ellipse((bx - 42 * S, by - 16 * S, bx + 30 * S, by + 26 * S), fill=(98, 52, 128, a), outline=ink, width=lw)
+        d.polygon([(bx + 24 * S, by - 8 * S), (bx + 48 * S, by - 20 * S), (bx + 40 * S, by + 2 * S)], fill=(80, 140, 70, a))
+    if T_TOM + .1 <= t < T_CAT:
+        bubble()
+        d.ellipse((bx - 40 * S, by - 26 * S, bx + 10 * S, by + 24 * S), fill=(214, 60, 44, a), outline=ink, width=lw)
+        d.polygon([(bx - 15 * S, by - 30 * S), (bx - 5 * S, by - 22 * S), (bx - 22 * S, by - 20 * S)], fill=(80, 140, 70, a))
+        d.text((bx + 20 * S, by - 24 * S), '?', font=q, fill=ink)
+    if T_CAT + .1 <= t:
+        bubble()
+        for ox, alive in ((-28, True), (26, False)):               # Schrödinger: the live cat, and a cat's skull
+            cx, cy = bx + ox * S, by + 4 * S
+            ol = ink
+            fur = (214, 150, 80, a) if alive else (238, 232, 216, a)
+            w1 = max(1, int(round(2 * S)))
+            d.polygon([(cx - 18 * S, cy - 8 * S), (cx - 14 * S, cy - 26 * S), (cx - 4 * S, cy - 14 * S)], fill=fur, outline=ol)
+            d.polygon([(cx + 18 * S, cy - 8 * S), (cx + 14 * S, cy - 26 * S), (cx + 4 * S, cy - 14 * S)], fill=fur, outline=ol)
+            if alive:
+                d.ellipse((cx - 20 * S, cy - 16 * S, cx + 20 * S, cy + 18 * S), fill=fur, outline=ol, width=w1)
+                d.ellipse((cx - 9 * S, cy - 3 * S, cx - 4 * S, cy + 2 * S), fill=ol); d.ellipse((cx + 4 * S, cy - 3 * S, cx + 9 * S, cy + 2 * S), fill=ol)
+            else:
+                d.rounded_rectangle((cx - 11 * S, cy + 4 * S, cx + 11 * S, cy + 20 * S), radius=5 * S, fill=fur, outline=ol, width=w1)
+                d.ellipse((cx - 19 * S, cy - 17 * S, cx + 19 * S, cy + 13 * S), fill=fur, outline=ol, width=w1)
+                d.rectangle((cx - 9 * S, cy + 6 * S, cx + 9 * S, cy + 12 * S), fill=fur)
+                d.ellipse((cx - 12 * S, cy - 7 * S, cx - 3 * S, cy + 3 * S), fill=ol); d.ellipse((cx + 3 * S, cy - 7 * S, cx + 12 * S, cy + 3 * S), fill=ol)
+                d.polygon([(cx - 2.5 * S, cy + 5 * S), (cx + 2.5 * S, cy + 5 * S), (cx, cy + 9 * S)], fill=ol)
+        d.text((bx - 8 * S, by - 60 * S), '?', font=q, fill=ink)
+
+
+def purr(c, tt, jump):
+    x = c
+    return math.sin(x * 60 + tt * 25) * (.55 + .45 * math.sin(x * 7 + tt * 3)) * jump
+
+
+def icon(d, era, kind, cx, cy, sz, label, selected=False):
+    """a desktop icon of its time, centred at (cx, cy) in virtual pixels"""
+    x0, y0, x1, y1 = cx - sz / 2, cy - sz / 2, cx + sz / 2, cy + sz / 2
+    mono = era == 4
+    ol = BK if mono else (40, 40, 40, 255)
+    if kind == 'disk':
+        body = WH if mono else (52, 56, 70, 255)
+        n = sz * .14
+        d.polygon([(x0, y0), (x1 - n, y0), (x1, y0 + n), (x1, y1), (x0, y1)], fill=body, outline=ol)
+        d.rectangle((x0 + sz * .25, y0, x1 - sz * .28, y0 + sz * .32), fill=WH if mono else G192, outline=ol)
+        d.rectangle((x0 + sz * .5, y0 + sz * .05, x0 + sz * .6, y0 + sz * .27), fill=BK if mono else (52, 56, 70, 255))
+        d.rectangle((x0 + sz * .14, y0 + sz * .5, x1 - sz * .14, y1 - sz * .04), fill=WH, outline=ol)
+    elif kind in ('folder', 'open'):
+        fill = WH if mono else (240, 210, 96, 255)
+        dark = (BK if mono else (176, 140, 40, 255))
+        d.polygon([(x0, y0 + sz * .18), (x0 + sz * .38, y0 + sz * .18), (x0 + sz * .46, y0 + sz * .3), (x1, y0 + sz * .3), (x1, y1 - sz * .1), (x0, y1 - sz * .1)],
+                  fill=fill, outline=ol)
+        if kind == 'open':                                          # the front flap swung down: it has been opened
+            d.polygon([(x0 + sz * .12, y0 + sz * .45), (x1 + sz * .08, y0 + sz * .45), (x1 - sz * .06, y1 - sz * .1), (x0, y1 - sz * .1)],
+                      fill=(255, 236, 150, 255) if not mono else WH, outline=ol)
+            d.rectangle((x0 + sz * .2, y0 + sz * .3, x1 - sz * .14, y0 + sz * .44), fill=WH, outline=dark)
+    else:                                                           # trash
+        fill = WH if mono else (176, 180, 186, 255)
+        d.rectangle((x0 + sz * .12, y0 + sz * .12, x1 - sz * .12, y0 + sz * .22), fill=fill, outline=ol)
+        d.rectangle((x0 + sz * .4, y0 + sz * .04, x1 - sz * .4, y0 + sz * .12), outline=ol)
+        d.polygon([(x0 + sz * .18, y0 + sz * .24), (x1 - sz * .18, y0 + sz * .24), (x1 - sz * .24, y1), (x0 + sz * .24, y1)], fill=fill, outline=ol)
+        for k in range(3):
+            xx = cx + (k - 1) * sz * .14
+            d.line((xx, y0 + sz * .32, xx, y1 - sz * .08), fill=ol)
+    f = font(F_UI if not mono else F_SYS, max(9, sz * .34))
+    tw = d.textlength(label, font=f); ty = y1 + 2
+    if mono:
+        d.rectangle((cx - tw / 2 - 2, ty, cx + tw / 2 + 2, ty + f.size + 1), fill=BK if selected else WH)
+        d.text((cx - tw / 2, ty), label, font=f, fill=WH if selected else BK)
+    else:
+        if selected: d.rectangle((cx - tw / 2 - 2, ty, cx + tw / 2 + 2, ty + f.size + 2), fill=(0, 0, 128, 255))
+        d.text((cx - tw / 2, ty), label, font=f, fill=WH)
+
+
+def desk_icons(d, t, era, VW, VH, sc):
+    """floppy, trash and a folder called you, down the right edge; opened at the tomato, dragged toward the trash at the cat"""
+    sz = round(80 * sc); x = VW - 62 * sc
+    icon(d, era, 'disk', x, 110 * sc, sz, 'disk')
+    icon(d, era, 'trash', x, 930 * sc, sz, 'trash')
+    yy = 330 * sc
+    if era == 6:
+        k = ease((t - T_CAT - .6) / 1.4)
+        yy = (330 + (775 - 330) * k) * sc
+        if 0 < k < 1: dotted(d, (x - sz / 2, 330 * sc - sz / 2, x + sz / 2, 330 * sc + sz / 2), (220, 220, 220, 255))
+    icon(d, era, 'open' if era == 5 else 'folder', x, yy, sz, 'you', selected=era == 5)
+
+
+def era_layer(t, era, w, h):
+    """everything the old screen draws over the room, at its own resolution, scaled up pixel for pixel"""
+    VW, VH = vres(era, w, h)
+    img = Image.new('RGBA', (VW, VH), (0, 0, 0, 0)); d = ImageDraw.Draw(img); d.fontmode = '1'
+    sc = VH / 1080
+    x0, y0, x1, y1 = win_rect(t)
+    X0, Y0, X1, Y1 = x0 * VW, (1 - y1) * VH, x1 * VW, (1 - y0) * VH
+    desk_icons(d, t, era, VW, VH, sc)
+    # the drag outlines while the window is moved
+    for lag in (.045, .09, .135):
+        gx0, gy0, gx1, gy1 = win_rect(t - lag)
+        if abs(gx0 - x0) + abs(gx1 - x1) > .004:
+            dotted(d, (gx0 * VW, (1 - gy1) * VH - 34 * sc, gx1 * VW, (1 - gy0) * VH), BK if era != 6 else (220, 220, 220, 255))
+    title = {4: 'render://sandbox/0047   guess(you)', 5: 'render://sandbox/0047 - guess(you)', 6: 'render://sandbox/0047 - guess(you)'}[era]
+    chrome(d, era, X0, Y0, X1, Y1, title, sc)
+    # the notes window beside it
+    AW, AH = 600 * sc, 560 * sc
+    ax = X1 + 60 * sc if x0 < .3 else 60 * sc
+    ay = 150 * sc
+    if era == 4 and T_EGG <= t:
+        chrome(d, 4, ax, ay, ax + AW, ay + AH, 'guess.log', sc, content=WH)
+        sbx = int(ax + AW - 13)                                     # a scroll bar, grey pattern
+        d.line((sbx, ay, sbx, ay + AH), fill=BK)
+        for yy in range(int(ay + 12), int(ay + AH - 12)):
+            for xx in range(sbx + 1, int(ax + AW)):
+                if (xx + yy) % 2 == 0: d.point((xx, yy), fill=BK)
+        for yb in (ay, ay + AH - 12):
+            d.rectangle((sbx, yb, ax + AW, yb + 12), fill=WH, outline=BK)
+        bs = max(1, int((AW - 40) / len(EGG[0])))
+        n = int(clamp((t - T_EGG) / .5) * len(EGG[0]))
+        bitmap(d, EGG, n, ax + 10, ay + 10, bs, BK)
+        k = int(clamp((t - T_EGG - .5) / .9) * len(NUTR))
+        fm = font(F_MONO, 26 * sc)
+        for i, ln in enumerate(NUTR[:k]): d.text((ax + 10, ay + 22 + len(EGG) * bs + i * 30 * sc), ln, font=fm, fill=BK)
+    if era == 5 and T_TOM <= t:
+        chrome(d, 5, ax, ay, ax + AW, ay + AH, 'C:\\SANDBOX\\GUESS.EXE', sc, content=BK)
+        bs = max(1, int((AW - 30) / len(TOM[0])))
+        n = int(clamp((t - T_TOM) / .5) * len(TOM[0]))
+        bitmap(d, TOM, n, ax + 12, ay + 12, bs, (255, 85, 85, 255))
+        k = int(clamp((t - T_TOM - .5) / .9) * len(LYCO))
+        fm = font(F_MONO, 17 * sc)
+        for i, ln in enumerate(LYCO[:k]):
+            d.text((ax + 12, ay + 30 + len(TOM) * bs + i * 30 * sc), ln, font=fm, fill=(255, 255, 85, 255) if i == 0 else (192, 192, 192, 255))
+        if (t * 2) % 1 < .5: d.text((ax + 12, ay + AH - 30 * sc), 'C:\\SANDBOX>_', font=fm, fill=(192, 192, 192, 255))
+    if era == 6 and T_CAT <= t:
+        chrome(d, 6, ax, ay, ax + AW, ay + AH, 'purr.wav - Recorder', sc, content=G192)
+        fb = font(F_SYS, 70 * sc)
+        n = int(clamp((t - T_CAT) / .4) * 3)
+        d.text((ax + 14, ay + 8), 'CAT'[:n], font=fb, fill=BK)
+        fu = font(F_UI, 24 * sc)
+        tt = min(t, T_ENJ + .12)
+        d.text((ax + 14, ay + 100 * sc), f'Position: {max(0., tt - T_CAT):4.2f} sec.', font=fu, fill=BK)
+        d.text((ax + AW - 190 * sc, ay + 100 * sc), 'Length: 3.00 sec.', font=fu, fill=BK)
+        px0, py0, px1, py1 = ax + 14, ay + 140 * sc, ax + AW - 14, ay + 400 * sc
+        d.rectangle((px0, py0, px1, py1), fill=BK); bevel(d, (px0 - 2, py0 - 2, px1 + 2, py1 + 2), raised=False)
+        cy, amp = (py0 + py1) / 2, (py1 - py0) * .42
+        d.line((px0, cy, px1, cy), fill=(0, 96, 0, 255))
+        jump = 2.0 if T_ENJ <= t else 1.
+        pts = [(px0 + (px1 - px0) * k / 160, cy - purr(k / 160, tt, jump) * amp * .5) for k in range(161)]
+        d.line(pts, fill=(0, 255, 0, 255), width=1)
+        d.text((ax + 14, ay + 418 * sc), 'purr   25–150 Hz', font=fu, fill=BK)
+        bw, by0 = 64 * sc, ay + AH - 70 * sc
+        for i, g in enumerate(('<<', '>>', '>', '[]', 'o')):
+            bx0 = ax + 14 + i * (bw + 8 * sc)
+            d.rectangle((bx0, by0, bx0 + bw, by0 + 50 * sc), fill=G192); bevel(d, (int(bx0), int(by0), int(bx0 + bw), int(by0 + 50 * sc)))
+            cx, cy2 = bx0 + bw / 2, by0 + 25 * sc
+            if g == 'o': d.ellipse((cx - 8 * sc, cy2 - 8 * sc, cx + 8 * sc, cy2 + 8 * sc), fill=(200, 0, 0, 255))
+            elif g == '[]': d.rectangle((cx - 8 * sc, cy2 - 8 * sc, cx + 8 * sc, cy2 + 8 * sc), fill=BK)
+            else:
+                for j in range(len(g)):
+                    off = (j - (len(g) - 1) / 2) * 14 * sc; s1 = 1 if g[0] == '>' else -1
+                    d.polygon([(cx + off - 7 * sc * s1, cy2 - 9 * sc), (cx + off + 7 * sc * s1, cy2), (cx + off - 7 * sc * s1, cy2 + 9 * sc)], fill=BK)
+    # bubbles, inside the window
+    bubble_art(d, t, X0 + (X1 - X0) * .68, Y0 + (Y1 - Y0) * .25, 95 * sc, sc, 255, era)
+    if era == 6 and t >= T_ENJ:
+        k = outc((t - T_ENJ) / .15)
+        d.text((X0 + (X1 - X0) * .40, Y0 + (Y1 - Y0) * (.45 - .05 * k)), 'meow', font=font(F_COMIC, 52 * sc),
+               fill=(255, 255, 255, int(255 * k)), stroke_width=1, stroke_fill=(0, 0, 0, int(255 * k)))
+    return img.resize((w, h), Image.NEAREST)
+
+
+def modern_layer(t, w, h):
+    """after the snap to full resolution: the film's own chrome, fading as the window centres"""
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    fade = 1 - clamp((t - T_CENTER) / .2)
+    if fade <= 0: return img
+    a = int(255 * fade)
+    x0, y0, x1, y1 = win_rect(t)
+    X0, Y0, X1, Y1 = x0 * w, (1 - y1) * h, x1 * w, (1 - y0) * h
+    fs = font(FONT, 19 * s)
+    d.rectangle((X0 - 3 * s, Y0 - 34 * s, X1 + 3 * s, Y1 + 3 * s), outline=(226, 222, 214, a), width=max(1, int(2 * s)))
+    d.rectangle((X0 - 3 * s, Y0 - 34 * s, X1 + 3 * s, Y0), fill=(22, 22, 24, a))
+    d.text((X0 + 10 * s, Y0 - 29 * s), 'render://sandbox/0047   guess(you)', font=fs, fill=(200, 196, 188, a))
+    bubble_art(d, t, X0 + (X1 - X0) * .68, Y0 + (Y1 - Y0) * .25, 95 * s, s, a, 7)
+    if t >= T_ENJ:
+        d.text((X0 + (X1 - X0) * .42, Y0 + (Y1 - Y0) * .4), 'meow', font=font(F_BOLD, 40 * s), fill=(250, 246, 236, a))
+    return img
+
+
+def top_layer(t, w, h):
+    """the sandbox (0:02.92), faint, all around and modern; it flashes where the window hits it"""
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    fade = 1 - clamp((t - T_CENTER) / .2)
+    if fade <= 0: return img
+    hitA = math.exp(-(t - T_BUMP) * 5) if t >= T_BUMP else 0.
+    F = (.015, .025, .985, .975); Bk = (.13, .15, .87, .85)
+    def P(u, v): return (u * w, (1 - v) * h)
+    base = int(45 * fade)
+    for (u0, v0, u1, v1) in (F, Bk):
+        d.rectangle((*P(u0, v1), *P(u1, v0)), outline=(240, 236, 226, base), width=max(1, int(s)))
+    for u, v, U, V in ((F[0], F[1], Bk[0], Bk[1]), (F[0], F[3], Bk[0], Bk[3]), (F[2], F[1], Bk[2], Bk[1]), (F[2], F[3], Bk[2], Bk[3])):
+        d.line((*P(u, v), *P(U, V)), fill=(240, 236, 226, base), width=max(1, int(s)))
+    if hitA > .01:
+        wall = (232, 190, 64, int(240 * hitA * fade))
+        d.line((*P(F[2], F[1]), *P(F[2], F[3])), fill=wall, width=max(2, int(3 * s)))
+        d.line((*P(F[2], F[1]), *P(Bk[2], Bk[1])), fill=wall, width=max(1, int(2 * s)))
+        d.line((*P(F[2], F[3]), *P(Bk[2], Bk[3])), fill=wall, width=max(1, int(2 * s)))
+    return img
+
+
+# ---- the cat: a glass desktop (c. 2009), drawn at 1600×900 with smooth type and shown a little soft on the 1080 screen ----
+from PIL import ImageFilter
+F_SEG, F_SEGB, F_SEGL = 'C:/Windows/Fonts/segoeui.ttf', 'C:/Windows/Fonts/segoeuib.ttf', 'C:/Windows/Fonts/segoeuil.ttf'
+GLASS_VH = 900
+
+
+def rrect_mask(size, box, r):
+    m = Image.new('L', size, 0); ImageDraw.Draw(m).rounded_rectangle(box, radius=r, fill=255); return m
+
+
+def glow_text(img, xy, text, f, fill, glow=(255, 255, 255), rad=5, strength=2):
+    lay = Image.new('RGBA', img.size, (0, 0, 0, 0)); ImageDraw.Draw(lay).text(xy, text, font=f, fill=glow + (255,))
+    lay = lay.filter(ImageFilter.GaussianBlur(rad))
+    for _ in range(strength): img.alpha_composite(lay)
+    ImageDraw.Draw(img).text(xy, text, font=f, fill=fill)
+
+
+def shadow(img, box, r, blur=12, off=5, a=120):
+    lay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    x0, y0, x1, y1 = box
+    ImageDraw.Draw(lay).rounded_rectangle((x0 - 4, y0 + off - 2, x1 + 4, y1 + off + 6), radius=r + 4, fill=(0, 0, 0, a))
+    img.alpha_composite(lay.filter(ImageFilter.GaussianBlur(blur)))
+
+
+def glass_window(img, X0, Y0, X1, Y1, title, sc, content=None):
+    """an Aero-like window round the content box; the content is left clear unless a colour is given"""
+    X0, Y0, X1, Y1 = int(X0), int(Y0), int(X1), int(Y1)
+    b, th = int(8 * sc + 1), int(30 * sc + 1)
+    box = (X0 - b, Y0 - th, X1 + b, Y1 + b)
+    shadow(img, box, 8)
+    ImageDraw.Draw(img).rectangle((X0, Y0, X1, Y1), fill=(0, 0, 0, 0))   # (the shadow is under the window, not over its picture)
+    W, H = img.size
+    frame = Image.new('RGBA', img.size, (0, 0, 0, 0)); fd = ImageDraw.Draw(frame)
+    for k in range(int(box[1]), int(box[3]) + 1):                 # the glass: lighter at the top, a cool tint
+        u = (k - box[1]) / max(1, box[3] - box[1])
+        fd.line((box[0], k, box[2], k), fill=(int(176 - 40 * u), int(208 - 34 * u), int(236 - 20 * u), int(190 - 30 * u)))
+    st = Image.new('RGBA', img.size, (0, 0, 0, 0)); sd = ImageDraw.Draw(st)   # the glass's diagonal streaks
+    for k, (o, wd, a) in enumerate(((.12, 30, 70), (.2, 12, 50), (.55, 46, 45), (.66, 14, 40), (.86, 26, 50))):
+        x = box[0] + (box[2] - box[0]) * o
+        sd.polygon([(x, box[1]), (x + wd * sc, box[1]), (x + wd * sc - 90 * sc, box[3]), (x - 90 * sc, box[3])], fill=(255, 255, 255, a))
+    frame.alpha_composite(st)
+    mask = rrect_mask(img.size, box, int(8 * sc))
+    hole = Image.new('L', img.size, 0); ImageDraw.Draw(hole).rectangle((X0, Y0, X1, Y1), fill=255)
+    mask = Image.composite(Image.new('L', img.size, 0), mask, hole)
+    clear = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    img.paste(Image.composite(frame, clear, mask), (0, 0), mask)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(box, radius=int(8 * sc), outline=(24, 44, 70, 230), width=1)
+    d.rounded_rectangle((box[0] + 1, box[1] + 1, box[2] - 1, box[3] - 1), radius=int(7 * sc), outline=(255, 255, 255, 110), width=1)
+    d.rectangle((X0 - 1, Y0 - 1, X1 + 1, Y1 + 1), outline=(40, 62, 88, 200))
+    if content: d.rectangle((X0, Y0, X1, Y1), fill=content)
+    glow_text(img, (X0 + 6 * sc, Y0 - th + 6 * sc), title, font(F_SEG, 15 * sc), (12, 22, 34, 255))
+    # caption buttons on the top edge: minimise, maximise (glass), close (red)
+    d = ImageDraw.Draw(img)
+    by0, by1 = box[1] + 1, box[1] + int(20 * sc)
+    cx1 = box[2] - int(6 * sc); cx0 = cx1 - int(44 * sc)
+    for k in range(by0, by1 + 1):
+        u = (k - by0) / max(1, by1 - by0)
+        d.line((cx0, k, cx1, k), fill=(int(236 - 40 * u), int(150 - 90 * u), int(130 - 90 * u), 255))
+    d.rounded_rectangle((cx0, by0, cx1, by1), radius=int(3 * sc), outline=(90, 24, 18, 255))
+    mx, my, rr = (cx0 + cx1) / 2, (by0 + by1) / 2, 4 * sc
+    d.line((mx - rr, my - rr, mx + rr, my + rr), fill=(255, 255, 255, 255), width=2); d.line((mx - rr, my + rr, mx + rr, my - rr), fill=(255, 255, 255, 255), width=2)
+    for i, g in enumerate(('max', 'min')):
+        gx1 = cx0 - i * int(27 * sc); gx0 = gx1 - int(27 * sc)
+        d.rounded_rectangle((gx0, by0, gx1, by1), radius=int(3 * sc), fill=(214, 228, 242, 220), outline=(60, 84, 110, 255))
+        mx = (gx0 + gx1) / 2
+        if g == 'max': d.rectangle((mx - 5 * sc, my - 4 * sc, mx + 5 * sc, my + 4 * sc), outline=(30, 40, 52, 255), width=2)
+        else: d.line((mx - 5 * sc, my + 3 * sc, mx + 5 * sc, my + 3 * sc), fill=(30, 40, 52, 255), width=2)
+    return th
+
+
+def glass_icon(img, kind, cx, cy, sz, label):
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = cx - sz / 2, cy - sz / 2, cx + sz / 2, cy + sz / 2
+    if kind == 'disk':
+        d.rounded_rectangle((x0, y0 + sz * .3, x1, y1 - sz * .12), radius=sz * .08, fill=(176, 182, 190, 255), outline=(90, 96, 106, 255))
+        d.rounded_rectangle((x0 + 2, y0 + sz * .3 + 2, x1 - 2, y0 + sz * .48), radius=sz * .06, fill=(226, 230, 236, 255))
+        d.rectangle((x0 + sz * .12, y1 - sz * .3, x1 - sz * .3, y1 - sz * .25), fill=(70, 74, 82, 255))
+        d.ellipse((x1 - sz * .2, y1 - sz * .32, x1 - sz * .12, y1 - sz * .24), fill=(80, 230, 90, 255))
+    elif kind == 'folder':
+        d.rounded_rectangle((x0, y0 + sz * .12, x0 + sz * .45, y0 + sz * .3), radius=sz * .05, fill=(214, 172, 80, 255))
+        d.rounded_rectangle((x0, y0 + sz * .2, x1, y1 - sz * .08), radius=sz * .06, fill=(222, 182, 92, 255), outline=(150, 112, 40, 255))
+        d.rectangle((x0 + sz * .1, y0 + sz * .1, x1 - sz * .14, y0 + sz * .5), fill=(250, 250, 248, 255), outline=(190, 190, 190, 255))
+        d.polygon([(x0 - sz * .02, y0 + sz * .38), (x1 + sz * .02, y0 + sz * .38), (x1 - sz * .04, y1 - sz * .08), (x0 + sz * .04, y1 - sz * .08)],
+                  fill=(246, 214, 130, 255), outline=(160, 120, 44, 255))
+        d.line((x0 + sz * .02, y0 + sz * .42, x1 - sz * .02, y0 + sz * .42), fill=(255, 240, 200, 255))
+    else:
+        d.polygon([(x0 + sz * .16, y0 + sz * .14), (x1 - sz * .16, y0 + sz * .14), (x1 - sz * .24, y1 - sz * .04), (x0 + sz * .24, y1 - sz * .04)],
+                  fill=(200, 218, 232, 200), outline=(110, 130, 150, 255))
+        d.ellipse((x0 + sz * .16, y0 + sz * .08, x1 - sz * .16, y0 + sz * .2), fill=(226, 238, 246, 220), outline=(110, 130, 150, 255))
+        for k in range(4):
+            xx = x0 + sz * (.3 + k * .13)
+            d.line((xx, y0 + sz * .24, xx + (k - 1.5) * sz * .02, y1 - sz * .1), fill=(140, 160, 180, 200))
+    f = font(F_SEG, 13 * GLASS_VH / 1080 * 1.1)
+    tw = d.textlength(label, font=f)
+    d.text((cx - tw / 2 + 1, y1 + 4), label, font=f, fill=(0, 0, 0, 170))
+    d.text((cx - tw / 2, y1 + 3), label, font=f, fill=(255, 255, 255, 255))
+
+
+def glass_layer(t, w, h):
+    VH = GLASS_VH; VW = int(round(VH * w / h)); sc = VH / 1080
+    img = Image.new('RGBA', (VW, VH), (0, 0, 0, 0))
+    fa = 1 - ease((t - T_CENTER) / .3)                              # maximised: the desktop's furniture goes
+    if fa <= 0: return Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    # desktop icons down the right; you is dragged toward the trash
+    sz = 58 * sc * 1.15; x = VW - 70 * sc
+    glass_icon(img, 'disk', x, 110 * sc, sz, 'disk')
+    glass_icon(img, 'trash', x, 900 * sc, sz, 'trash')
+    k = ease((t - T_CAT - .6) / 1.4)
+    glass_icon(img, 'folder', x, (330 + (735 - 330) * k) * sc, sz, 'you')
+    # the taskbar
+    d = ImageDraw.Draw(img)
+    tb = VH - int(40 * sc * 1.1)
+    for yy in range(tb, VH):
+        u = (yy - tb) / max(1, VH - tb)
+        d.line((0, yy, VW, yy), fill=(int(40 - 22 * u), int(58 - 30 * u), int(82 - 40 * u), 205))
+    d.line((0, tb, VW, tb), fill=(255, 255, 255, 70))
+    cy = (tb + VH) / 2; r0 = (VH - tb) * .42
+    d.ellipse((14 * sc - 2, cy - r0, 14 * sc + 2 * r0, cy + r0), fill=(54, 118, 196, 255), outline=(170, 210, 250, 255))
+    gc = (14 * sc + r0, cy)                                         # the start button is the gap ring
+    d.arc((gc[0] - r0 * .55, gc[1] - r0 * .55, gc[0] + r0 * .55, gc[1] + r0 * .55), start=-62, end=242, fill=(255, 255, 255, 255), width=max(2, int(2.4 * sc)))
+    for i, kind in enumerate(('folder', 'wave', 'render')):
+        bx0 = 70 * sc + i * 62 * sc; bx1 = bx0 + 54 * sc
+        if kind != 'folder':
+            d.rounded_rectangle((bx0, tb + 3, bx1, VH - 3), radius=int(4 * sc), fill=(255, 255, 255, 46), outline=(255, 255, 255, 90))
+        mx = (bx0 + bx1) / 2
+        if kind == 'folder':
+            d.rounded_rectangle((mx - 11 * sc, cy - 8 * sc, mx + 11 * sc, cy + 9 * sc), radius=2, fill=(232, 192, 96, 255))
+        elif kind == 'wave':
+            pts = [(mx - 12 * sc + j * 1.2 * sc, cy + math.sin(j * .9) * 7 * sc * math.sin(j / 20 * math.pi)) for j in range(21)]
+            d.line(pts, fill=(120, 200, 255, 255), width=2)
+        else:
+            d.rectangle((mx - 12 * sc, cy - 9 * sc, mx + 12 * sc, cy + 9 * sc), fill=(230, 210, 180, 255), outline=(60, 90, 130, 255))
+            d.rectangle((mx - 12 * sc, cy - 9 * sc, mx + 12 * sc, cy - 5 * sc), fill=(70, 130, 200, 255))
+    ss = int(t); clock = f'{ss // 60}:{ss % 60:02d}'                 # the clock keeps the song's time
+    fc = font(F_SEG, 14 * sc * 1.1)
+    d.text((VW - 20 * sc - d.textlength(clock, font=fc), cy - fc.size * .62), clock, font=fc, fill=(255, 255, 255, 255))
+    # the render window
+    x0, y0, x1, y1 = win_rect(t)
+    X0, Y0, X1, Y1 = x0 * VW, (1 - y1) * VH, x1 * VW, (1 - y0) * VH
+    glass_window(img, X0, Y0, X1, Y1, 'render://sandbox/0047 - guess(you)', sc)
+    # the recorder, light
+    AW, AH = 600 * sc, 560 * sc
+    ax = X1 + 60 * sc if x0 < .3 else 60 * sc; ay = 150 * sc
+    glass_window(img, ax, ay, ax + AW, ay + AH, 'purr.wav - Recorder', sc, content=(240, 241, 243, 255))
+    d = ImageDraw.Draw(img)
+    n = int(clamp((t - T_CAT) / .4) * 3)
+    d.text((ax + 16 * sc, ay + 6 * sc), 'CAT'[:n], font=font(F_SEGL, 64 * sc), fill=(40, 46, 56, 255))
+    fu = font(F_SEG, 21 * sc)
+    tt = min(t, T_ENJ + .12)
+    pos = max(0., tt - T_CAT)
+    d.text((ax + 18 * sc, ay + 92 * sc), f'00:0{pos:4.2f}', font=fu, fill=(60, 66, 76, 255))
+    d.text((ax + AW - 150 * sc, ay + 92 * sc), 'purr  25–150 Hz', font=fu, fill=(110, 116, 126, 255))
+    px0, py0, px1, py1 = ax + 16 * sc, ay + 150 * sc, ax + AW - 16 * sc, ay + 420 * sc
+    d.rounded_rectangle((px0, py0, px1, py1), radius=int(4 * sc), fill=(255, 255, 255, 255), outline=(196, 200, 206, 255))
+    for j in range(13):                                             # a time ruler
+        xx = px0 + (px1 - px0) * j / 12
+        d.line((xx, py0 + 2, xx, py0 + (10 if j % 3 == 0 else 6) * sc), fill=(170, 174, 180, 255))
+    cy2, amp = (py0 + py1) / 2 + 6 * sc, (py1 - py0) * .4
+    d.line((px0 + 2, cy2, px1 - 2, cy2), fill=(206, 214, 226, 255))
+    jump = 2.0 if T_ENJ <= t else 1.
+    up = [(px0 + (px1 - px0) * j / 220, cy2 - abs(purr(j / 220, tt, jump)) * amp * .5) for j in range(221)]
+    dn = [(xx, 2 * cy2 - yy) for xx, yy in reversed(up)]
+    d.polygon(up + dn, fill=(92, 146, 226, 255))
+    d.line(up, fill=(46, 96, 186, 255), width=1); d.line(dn, fill=(46, 96, 186, 255), width=1)
+    ph = px0 + (px1 - px0) * clamp(pos / 3.)
+    d.line((ph, py0 + 2, ph, py1 - 2), fill=(220, 50, 40, 255), width=2)
+    by = ay + AH - 62 * sc
+    for i, g in enumerate(('rec', 'play', 'stop')):
+        cx = ax + 50 * sc + i * 70 * sc; rr = 24 * sc
+        d.ellipse((cx - rr, by - rr + 24 * sc, cx + rr, by + rr + 24 * sc), fill=(250, 250, 252, 255), outline=(170, 176, 186, 255))
+        cyb = by + 24 * sc
+        if g == 'rec': d.ellipse((cx - 10 * sc, cyb - 10 * sc, cx + 10 * sc, cyb + 10 * sc), fill=(214, 46, 40, 255))
+        elif g == 'play': d.polygon([(cx - 6 * sc, cyb - 10 * sc), (cx + 10 * sc, cyb), (cx - 6 * sc, cyb + 10 * sc)], fill=(50, 56, 66, 255))
+        else: d.rectangle((cx - 8 * sc, cyb - 8 * sc, cx + 8 * sc, cyb + 8 * sc), fill=(50, 56, 66, 255))
+    # the guess, and meow
+    bubble_art(d, t, X0 + (X1 - X0) * .68, Y0 + (Y1 - Y0) * .25, 95 * sc, sc, 255, 6)
+    if t >= T_ENJ:
+        kk = outc((t - T_ENJ) / .15)
+        glow_text(img, (X0 + (X1 - X0) * .40, Y0 + (Y1 - Y0) * (.45 - .05 * kk)), 'meow', font(F_SEGB, 46 * sc),
+                  (255, 255, 255, int(255 * kk)), glow=(40, 30, 20), rad=4, strength=1)
+    if fa < 1:
+        img.putalpha(img.getchannel('A').point(lambda v: int(v * fa)))
+    return img.resize((w, h), Image.BILINEAR)
+
+
+def layer(t, era, w, h):
+    if era == 0: return Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    if era == 6: return glass_layer(t, w, h)
+    if era == 7: return modern_layer(t, w, h)
+    return era_layer(t, era, w, h)
+
+
+def textures(t, w, h):
+    ea, eb, wp = eras(t)
+    if wp >= 1: ui = layer(t, eb, w, h)
+    else:                                                           # the raster wipe: the new screen from the top down
+        ui = layer(t, ea, w, h)
+        yw = int(wp * h)
+        if yw > 0: ui.paste(layer(t, eb, w, h).crop((0, 0, w, yw)), (0, 0))
+    return {'u_ui': ui, 'u_top': top_layer(t, w, h)}

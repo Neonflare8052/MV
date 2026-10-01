@@ -1,0 +1,115 @@
+"""s14d · 2:41.70–2:46.4  (replaces the black after s13, and s14's opening; draft)
+
+2:41.70           s13's blood fills the screen.  It goes back into the paper like ink, toward one point; under it the sheet
+                  of the Analytical Engine was there all along, faint.  The point slides to the centre.
+2:42.32           the music lifts: the margins are inked in.
+2:42.632 If I can / 2:43.315 give them all the
+                  the parts fall into place round the red point, one group a beat: base, hopper, barrel and gears,
+                  bed and brushes, pockets, the store columns.  The point ends in a card's hole.
+2:45.166 EXECUTION   (v4) the Engine, finished, holds through the word.
+2:45.77           night: the paper goes black, the ink lime white; Babbage's words give way to the rules for using it;
+                  the title is struck out and stamped; every card's hole is red; the counter over pocket 4 runs to
+                  041377; over the point an eye opens, its gap turned down into the light it throws on the machine.
+2:46.016 Then I can
+                  the drawing closes in on the point.
+
+The machine, the sheet and the camera are t11's (tests/t11_assembly)."""
+import sys, math, importlib.util
+from pathlib import Path
+import numpy as np
+
+_D = Path(__file__).resolve().parent
+_T11 = _D.parents[1] / 'tests' / 't11_assembly'
+sys.path.insert(0, str(_T11))
+import drafting
+_sp = importlib.util.spec_from_file_location('t11r', _T11 / 'render.py'); T11 = importlib.util.module_from_spec(_sp); _sp.loader.exec_module(T11)
+
+SRC = (_D / 's14d_assembly.glsl').read_text(encoding='utf-8')
+POST = dict(u_bloom=0., u_ca=0., u_grain=.012)
+
+T_IN, X = 161.70, 165.77                                     # v4: night once EXECUTION is sung (was 165.166)
+LAND = [162.76, 163.22, 163.69, 164.15, 164.61, 165.08]      # one group of parts a beat
+DROP_T, DROP_H = .17, 120.
+HOLE = (7., 10.34, 0.)                                       # world position of the envelope's point (its flap meets the centre)
+SCALE0 = 74.
+DOT0 = (.445, .5)                                            # where s13's red disc was, as a fraction of the frame
+COUNT = 41377
+SCALE_END = 7.5
+PUSH = 999.                                                  # it holds on the night a moment, then closes in
+FAC = X + .26                                                # the eye is open: the factories rise
+
+
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def drop(t, land):
+    if t < land - DROP_T: return 1e4
+    if t < land:
+        s = (t - land + DROP_T) / DROP_T
+        return DROP_H * (1 - s) ** 2
+    return -.6 * math.sin(math.pi * clamp((t - land) / .12))  # it lands, and settles
+
+
+def scale(t):
+    return SCALE0 * math.exp(math.log(SCALE_END / SCALE0) * ease((t - PUSH) / (168.911 - PUSH))) if t > PUSH else SCALE0
+
+
+_CAM = {}
+
+
+def cam(w, h, sc):
+    c = T11.Cam(w, h, c=HOLE, scale=sc)
+    return c
+
+
+def params(t):
+    W, H = 1920., 1080.                                      # u_dot is set in pixels in main() via u_res; here in 1080p then scaled
+    sc = scale(t)
+    c = cam(1920, 1080, sc)
+    k = ease((t - T_IN - .02) / .8)
+    dot = ((DOT0[0] + (.5 - DOT0[0]) * k), .5)
+    rec = 2300. * (1 - outc((t - T_IN - .02) / .9)) + 0.
+    n = int(round(COUNT * outc((t - X - .01) / .6))) if t >= X else 0
+    digits = f'{n:06d}'
+    return dict(c.uniforms(),
+                u_drop=[float(drop(t, L)) for L in LAND],
+                u_dotF=dot, u_recF=rec, u_stain=1. - ease((t - 162.2) / .6),
+                u_dotA=1.,
+                u_ghost=.16 + .84 * ease((t - 162.32) / .3),
+                u_q=1., u_notes=ease((t - 164.7) / .4), u_sw=1. if t >= X else 0.,
+                u_strike=1. if t >= X else 0., u_stamp=1. if t >= X else 0., u_man=1. if t >= X else 0.,
+                u_inv=1. if t >= X else 0., u_eye=outc((t - X) / .22), u_cone=ease((t - X - .08) / .3),
+                u_z=SCALE0 / sc, u_fac=outc((t - FAC) / .35), u_smk=t - FAC,
+                u_exec=1. if t >= X else 0., u_cnt=tuple(float(ch) for ch in digits),
+                u_chim=[(float(a), float(b)) for a, b in (CH + [(-9., -9.)] * 12)[:12]])
+
+
+_TX = {}
+CH = []
+_sp2 = importlib.util.spec_from_file_location('s14src_d', _D / 's14_cards.py'); _S14 = importlib.util.module_from_spec(_sp2); _sp2.loader.exec_module(_S14)
+S14FACE = _S14.FACE
+
+
+def eye_glyphs():
+    """'<' and '>' in the code font, a ring's width apart: the ring itself is drawn in the shader."""
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = 990, 330
+    img = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    f = ImageFont.truetype('C:/Windows/Fonts/CascadiaMono.ttf', 300)
+    for ch, x in (('<', W * .27), ('>', W * .73)):
+        d.text((x, H * .5), ch, font=f, fill=(255, 255, 255, 255), anchor='mm')
+    return img
+
+
+def textures(t, w, h):
+    if (w, h) not in _TX:
+        _TX.clear()
+        L = drafting.draw_layers(cam(w, h, SCALE0), w, h)
+        CH[:] = [(x / (w * 1080 / h), 1. - y / 1080.) for x, y in drafting.CHIMNEYS][:12]
+        _TX[(w, h)] = {'u_odo': T11.odo_atlas(), 'u_col': T11.col_atlas(), 'u_face': S14FACE, 'u_eyeG': eye_glyphs(),
+                       'u_Lfn': L['frame_n'], 'u_Lnn': L['notes_n'], 'u_Lfac': L['factory'],
+                       'u_Lf': L['frame'], 'u_Lq': L['quotes'], 'u_Lt': L['title'], 'u_Ln': L['notes'],
+                       'u_Ls': L['strike'], 'u_Lp': L['stamp'], 'u_Lm': L['manual']}
+    return _TX[(w, h)]

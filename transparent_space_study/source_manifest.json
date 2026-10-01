@@ -1,0 +1,30 @@
+[
+  {
+    "original": "claude/engine/gl.py",
+    "sha256": "e2e625bffff24f43e61877ec130afd13da920c39959c64ecdf36001b66c9814a"
+  },
+  {
+    "original": "claude/film/shots/s03_self.py",
+    "sha256": "99d86d9eb0c08a589193635b5d17bb6b0047606bed0eb84b596244ce096c8d2a"
+  },
+  {
+    "original": "claude/film/shots/s02_execute.py",
+    "sha256": "1e9754ad11d7483126a299f1eca7b39936ec975cc9403bfef1e0c64f84bf2944"
+  },
+  {
+    "original": "claude/audio/feat_14_31.npz",
+    "sha256": "859ae17364db0df9a2bc21fb80e13a2bebdf584955ab80218a0df2a5b228c36e"
+  },
+  {
+    "original": "Mili - world.execute (me) ;.mp3",
+    "sha256": "3683956e43df0e1252d93ca2339d2d26948b8112813f703ce2f827f004191785"
+  },
+  {
+    "original": "claude\\film\\master.py",
+    "sha256": "e434c44967995cfec38cb30c62eb8d61cf428cdb07e63000455b2b701f896044"
+  },
+  {
+    "original": "claude\\film\\film_full_v1_1080p.mp4",
+    "sha256": "96cca7d9e6fe7045985b83f2291054d8bc80e931612202c5c761fc9fa63e3257"
+  }
+]

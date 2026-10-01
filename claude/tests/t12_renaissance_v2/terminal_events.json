@@ -1,0 +1,66 @@
+{
+  "model": "fictional FIFO worker; load-dependent validation cost; finite admission pool",
+  "source_start": 122.5,
+  "burst_start": 136.72,
+  "admission_stall": 138.3287102661274,
+  "buffer_freeze": 139.55,
+  "total_submissions": 450,
+  "responses": [
+    {
+      "id": 1,
+      "sent": 134.7,
+      "returned": 134.8818,
+      "latency_ms": 181.8
+    },
+    {
+      "id": 2,
+      "sent": 135.35,
+      "returned": 135.5318,
+      "latency_ms": 181.8
+    },
+    {
+      "id": 3,
+      "sent": 136.72,
+      "returned": 136.9018,
+      "latency_ms": 181.8
+    },
+    {
+      "id": 4,
+      "sent": 136.85,
+      "returned": 137.08360000000002,
+      "latency_ms": 233.6
+    },
+    {
+      "id": 5,
+      "sent": 136.94894206239175,
+      "returned": 137.26887070850543,
+      "latency_ms": 319.929
+    },
+    {
+      "id": 6,
+      "sent": 137.02932131730572,
+      "returned": 137.47068173030522,
+      "latency_ms": 441.36
+    },
+    {
+      "id": 7,
+      "sent": 137.097216133308,
+      "returned": 137.71454814036727,
+      "latency_ms": 617.332
+    },
+    {
+      "id": 8,
+      "sent": 137.156089014916,
+      "returned": 138.08155993521373,
+      "latency_ms": 925.471
+    }
+  ],
+  "final": {
+    "sent": 450,
+    "replied": 8,
+    "pending": 442,
+    "last_reply": 138.08155993521373,
+    "age": 1.4684400647862788,
+    "stalled": true
+  }
+}

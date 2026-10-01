@@ -1,0 +1,60 @@
+"""t02 · only god / proof of my existence (1:24.9–1:28.8).
+
+Pure black. On "you're the proof" a star sweeps past the camera from behind, curves away and dives
+behind an unseen black hole; lensing wraps its light into arcs / an Einstein ring and the shadow appears.
+"""
+import sys, math, argparse, time
+from pathlib import Path
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / 'engine'))
+from gl import Renderer, encode, save_png
+
+START, END = 84.9, 88.8
+T_YOU, T_EXIST, T_NEXT = 86.538, 87.922, 88.587
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+
+
+def bez(p0, p1, p2, p3, s):
+    u = 1 - s
+    return tuple(u**3 * a + 3 * u * u * s * b + 3 * u * s * s * c + s**3 * d for a, b, c, d in zip(p0, p1, p2, p3))
+
+
+def params(t):
+    cam = (0., .35, 10.2 - .5 * ease((t - 86.8) / 2.))       # a slow push-in: we are closer than we thought
+    # path: just behind the camera's right shoulder -> slowly across the near field (read it as a star)
+    #       -> wide arc -> almost exactly behind the hole
+    P0, P1, P2, P3 = (3.4, .5, 8.4), (1.7, .3, 5.6), (7.5, .1, -8.), (.28, -.62, -15.)
+    u = clamp((t - 86.38) / (T_EXIST + .15 - 86.38))
+    s = .2 * ease(u / .38) if u < .38 else .2 + .8 * (1 - (1 - (u - .38) / .62) ** 2.4)
+    star = bez(P0, P1, P2, P3, s)
+    if t > T_EXIST + .15:                                       # keeps drifting: the ring opens into two arcs
+        k = t - T_EXIST - .15
+        star = (star[0] - 2.4 * k * k - .6 * k, star[1] + .5 * k, star[2])
+    vis = ease((t - 86.38) / .06)
+    return dict(u_cam=cam, u_look=(0., 0., 0.), u_fov=math.radians(52.), u_star=star, u_rstar=.3,
+                u_glow=.05 * vis, u_bright=.95 * vis, u_corona=.3 * vis)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--w', type=int, default=1920); ap.add_argument('--h', type=int, default=1080)
+    ap.add_argument('--sub', type=int, default=4); ap.add_argument('--stills', type=str)
+    ap.add_argument('--out', type=str, default=str(HERE / 'preview_1080p.mp4'))
+    a = ap.parse_args()
+    r = Renderer(a.w, a.h, (HERE / 'scene.glsl').read_text(encoding='utf-8'), subframes=a.sub)
+    r.post.update(u_bloom=.45, u_ca=.008)
+    if a.stills:
+        (HERE / 'stills').mkdir(exist_ok=True)
+        for t in map(float, a.stills.split(',')):
+            save_png(r.frame(t, params), a.w, a.h, HERE / 'stills' / f'{t:07.3f}.png'); print('still', t, flush=True)
+        return
+    fps = 60; n = round((END - START) * fps); t0 = time.monotonic()
+    encode(a.out, a.w, a.h, fps, START, END - START, (r.frame(START + i / fps, params) for i in range(n)))
+    print('done', a.out, f'{time.monotonic() - t0:.0f}s')
+
+
+if __name__ == '__main__':
+    main()

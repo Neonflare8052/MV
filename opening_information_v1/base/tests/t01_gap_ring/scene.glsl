@@ -1,0 +1,582 @@
+#version 330
+// t01 · gap ring: blind my vision -> dizzy -> A.D to B.C -> unite so deeply (0:47–0:59)
+uniform vec2  u_res;
+uniform float u_time, u_weight;
+uniform float u_R;       // disk radius (world units)
+uniform float u_half;    // gap half-angle (rad); PI = fully open, 0 = closed
+uniform float u_gap;     // gap centre angle (rad)
+uniform vec2  u_cam;     // camera centre (world)
+uniform float u_zoom;    // world units per half screen height * 2
+uniform float u_token;   // token-field visibility under the disk
+uniform float u_focus;   // 0 blurred .. 1 sharp (time panorama)
+uniform float u_expo;    // exposure of what is seen through the gap
+uniform float u_dizzy;   // double-vision amount
+uniform float u_planet;  // 0 ceramic disk .. 1 proto-Earth
+uniform float u_clock;   // quartz display minutes (runs backwards)
+uniform float u_gear;    // gear rotation (rad, decreasing)
+uniform float u_hand;    // mechanical hand angle (rad)
+uniform float u_shadow;  // sundial shadow angle (rad)
+uniform float u_reverse; // reversed time for billowing clouds / smoke
+uniform float u_day;     // B.C: one day passing (backwards) over the settlement 0..1
+uniform vec2  u_tpos;    // Theia centre
+uniform float u_trad;    // Theia radius
+uniform float u_theat;   // Theia surface heat
+uniform float u_melt;    // molten glow in the (former) gap
+uniform float u_flash;   // impact flash
+uniform float u_k;       // seconds since contact (<0 before)
+uniform float u_k2;      // seconds since second ejecta wave (<0 before)
+uniform vec2  u_hit;     // impact point
+uniform float u_stars;
+out vec4 fragColor;
+
+#define PI 3.14159265
+#define TAU 6.28318531
+float PX;
+
+// ---------- noise ----------
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float h13(vec3 p3){ p3=fract(p3*.1031); p3+=dot(p3,p3.zyx+31.32); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float vn3(vec3 p){ vec3 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  float a=mix(mix(h13(i),h13(i+vec3(1,0,0)),f.x),mix(h13(i+vec3(0,1,0)),h13(i+vec3(1,1,0)),f.x),f.y);
+  float b=mix(mix(h13(i+vec3(0,0,1)),h13(i+vec3(1,0,1)),f.x),mix(h13(i+vec3(0,1,1)),h13(i+vec3(1,1,1)),f.x),f.y);
+  return mix(a,b,f.z); }
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<5;i++){ s+=a*vn(p); p=p*2.03+vec2(1.7,9.2); a*=.5; } return s; }
+float fbm3(vec3 p){ float s=0.,a=.5; for(int i=0;i<5;i++){ s+=a*vn3(p); p=p*2.03+vec3(1.7,9.2,4.1); a*=.5; } return s; }
+mat2 rot(float a){ float c=cos(a),s=sin(a); return mat2(c,s,-s,c); }
+float wrapA(float a){ return mod(a+PI,TAU)-PI; }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return length(pa-ba*h); }
+float sdCap(vec2 p, vec2 a, vec2 b, float ra, float rb){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return length(pa-ba*h)-mix(ra,rb,h); }
+float fill(float d){ return 1.-smoothstep(-PX,PX,d); }
+float stroke(float d, float w){ return 1.-smoothstep(w-PX,w+PX,abs(d)); }
+
+// ---------- engraving (hatch) ----------
+float hatch(vec2 p, float tone, float ang, float freq){
+  vec2 d=vec2(cos(ang),sin(ang));
+  float v=dot(p,vec2(-d.y,d.x))*freq;
+  float l=abs(fract(v)-.5);
+  float w=clamp(tone,0.,1.)*.5;
+  float aa=max(freq*PX,1e-4);
+  return 1.-smoothstep(w-aa,w+aa,l);
+}
+vec3 engrave(vec3 col, float tone, vec2 p, vec3 ink){
+  float wob=.0015*vn(p*60.);
+  float a=hatch(p+wob, tone*.9, .55, 190.);
+  float b=hatch(p-wob, clamp(tone*1.6-.8,0.,1.)*.8, -.75, 150.);
+  return mix(col, ink, max(a,b)*.8);
+}
+
+// ---------- context-window token field (hand-off from previous shot) ----------
+vec3 tokens(vec2 p){
+  float g=.034;
+  vec2 q=p+vec2(u_time*.22,0.);
+  vec2 id=floor(q/g), f=fract(q/g)-.5;
+  float r=h12(id);
+  vec2 bx=abs(f)-vec2(.36,.26);
+  float d=(length(max(bx,0.))+min(max(bx.x,bx.y),0.)-.06)*g;
+  float edge=.42;
+  float inside=smoothstep(edge+.01,edge-.01,p.x);
+  float on=step(.55,r)*(.25+.75*step(.93,h12(id+floor(u_time*3.))))*mix(.05,.55,inside);
+  vec3 cu=vec3(.85,.52,.26), wh=vec3(.9,.88,.84);
+  vec3 c=mix(wh*.8,cu,step(.85,r))*on*fill(d)*.7;
+  c+=vec3(1.)*stroke(p.x-edge,.001)*1.4;              // window boundary
+  return c;
+}
+
+// ---------- seven-segment ----------
+float seven(vec2 q, int dg, out float ghost){
+  const int T[10]=int[10](0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F);
+  q.x+=q.y*.12;
+  vec2 A=vec2(-.25,.5),B=vec2(.25,.5),C=vec2(.25,0.),D=vec2(.25,-.5),E=vec2(-.25,-.5),F=vec2(-.25,0.);
+  vec2 e=vec2(.07,0.), f=vec2(0.,.07);
+  float s[7];
+  s[0]=sdSeg(q,A+e,B-e); s[1]=sdSeg(q,B-f,C+f); s[2]=sdSeg(q,C-f,D+f); s[3]=sdSeg(q,E+e,D-e);
+  s[4]=sdSeg(q,E+f,F-f); s[5]=sdSeg(q,F+f,A-f); s[6]=sdSeg(q,F+e,C-e);
+  int m=T[dg]; float on=1e3, all=1e3;
+  for(int i=0;i<7;i++){ all=min(all,s[i]); if(((m>>i)&1)==1) on=min(on,s[i]); }
+  ghost=all; return on;
+}
+
+// ---------- the three clocks (disk-local q = p/R, |q|<1) ----------
+vec3 quartz(vec2 q){
+  vec3 c=vec3(.018,.022,.028);
+  float refl=smoothstep(.25,0.,abs(q.x*.8+q.y*.55-.35))*.9+smoothstep(.12,0.,abs(q.x*.8+q.y*.55-.62))*.5;
+  c+=vec3(.25,.45,.7)*.10*refl;                               // sky-blue reflection on the glass
+  // copper traces
+  for(int i=0;i<5;i++){ float a=radians(55.+float(i)*17.); vec2 d=vec2(cos(a),sin(a));
+    float l=sdSeg(q,d*.08,d*(.26+.05*float(i%2)));
+    c+=vec3(.85,.5,.25)*.35*(1.-smoothstep(.004,.008,l)); }
+  // LCD HH:MM
+  float m=max(u_clock,0.); int hh=int(m/60.)%24, mm=int(mod(m,60.));
+  int dg[4]=int[4](hh/10,hh%10,mm/10,mm%10);
+  vec2 o=vec2(0.,.60); float s=.16, gl=1e3, on=1e3;
+  for(int i=0;i<4;i++){ float gh; vec2 pos=o+vec2((float(i)-1.5)*.105+(i>1?.03:-.03),0.);
+    on=min(on,seven((q-pos)/s,dg[i],gh)*s); gl=min(gl,gh*s); }
+  float colon=min(length(q-o-vec2(0.,.035)),length(q-o-vec2(0.,-.035)))-.008;
+  on=min(on,colon);
+  vec3 lcd=vec3(.55,.9,.82);
+  float w=.011;
+  c+=lcd*.05*(1.-smoothstep(w-.002,w+.002,gl));
+  c+=lcd*1.6*(1.-smoothstep(w-.002,w+.002,on));
+  c+=lcd*.25*exp(-max(on,0.)*60.);
+  return c;
+}
+
+float gearSD(vec2 p, vec2 c, float r, float teeth, float ang){
+  vec2 d=p-c; float l=length(d); float a=atan(d.y,d.x)+ang;
+  float t=smoothstep(-.3,.3,cos(a*teeth));
+  float outer=l-(r*.93+r*.1*t);
+  float an=mod(a,TAU/5.)-PI/5.;
+  float spoke=abs(l*sin(an))-r*.07;
+  float cut=max(l-r*.72,-min(spoke,l-r*.2));
+  float hole=l-r*.06;
+  return max(max(outer,-cut),-hole);
+}
+float gears(vec2 q){
+  vec2 dir=vec2(cos(radians(210.)),sin(radians(210.)));
+  vec2 cA=dir*.52; float rA=.3;
+  vec2 dB=vec2(cos(radians(250.)),sin(radians(250.)));
+  float rB=.17; vec2 cB=cA+dB*(rA+rB)*.97;
+  vec2 cC=dir*.14+vec2(0.,-.02); float rC=.11;
+  float g=gearSD(q,cA,rA,16.,u_gear);
+  g=min(g,gearSD(q,cB,rB,9.,-u_gear*rA/rB+.2));
+  g=min(g,gearSD(q,cC,rC,7.,-u_gear*rA/rC));
+  return g;
+}
+vec3 mech(vec2 q){
+  vec3 c=vec3(.025,.02,.018)*(.8+.4*fbm(q*9.));
+  // chapter ring ticks
+  float a=atan(q.y,q.x), r=length(q);
+  float tk=abs(fract(a/TAU*60.)-.5)*TAU/60.*r;
+  c+=vec3(.7,.62,.5)*.35*(1.-smoothstep(.003,.006,tk))*step(.86,r)*step(r,.95);
+  float g=gears(q);
+  vec2 e=vec2(.002,0.);
+  vec2 n2=vec2(gears(q+e.xy)-gears(q-e.xy),gears(q+e.yx)-gears(q-e.yx))/(2.*e.x);
+  float bev=clamp(-g/.02,0.,1.);
+  vec3 n=normalize(vec3(-n2*(1.-bev)*1.6,1.));
+  vec3 L=normalize(vec3(-.5,.6,.65));
+  float dif=max(dot(n,L),0.), sp=pow(max(dot(reflect(-L,n),vec3(0,0,1)),0.),24.);
+  vec3 brass=vec3(.78,.56,.25);
+  vec3 gc=brass*(.12+.9*dif)+vec3(1.,.85,.6)*sp*1.2;
+  float sh=gears(q-vec2(.012,-.016));                          // drop shadow
+  c*=1.-.7*fill(sh);
+  c=mix(c,gc,fill(g));
+  // steel hand
+  vec2 hd=vec2(cos(u_hand),sin(u_hand));
+  float hs=sdCap(q,-hd*.08,hd*.9,.022,.004);
+  float hsh=sdCap(q-vec2(.01,-.014),-hd*.08,hd*.9,.022,.004);
+  c*=1.-.6*fill(hsh);
+  vec3 steel=vec3(.55,.6,.68)*(.5+.6*max(dot(normalize(vec3(-hd.y,hd.x,1.)),L),0.));
+  c=mix(c,steel,fill(hs));
+  return c;
+}
+
+vec3 sundial(vec2 q){
+  float r=length(q), a=atan(q.y,q.x);
+  float n=fbm(q*7.)*.6+fbm(q*31.)*.4;
+  vec3 stone=vec3(.58,.54,.47)*(.62+.55*n);
+  // carved hour lines + arc
+  float hl=abs(fract(a/TAU*24.)-.5)*TAU/24.*r;
+  float carve=(1.-smoothstep(.003,.007,hl))*step(.25,r)*step(r,.9);
+  carve=max(carve,1.-smoothstep(.004,.008,abs(r-.9)));
+  carve=max(carve,1.-smoothstep(.003,.006,abs(r-.25)));
+  stone*=1.-.45*carve;
+  // warm sun + gnomon shadow
+  vec3 sun=vec3(.8,.68,.55);
+  vec2 sd=vec2(cos(u_shadow),sin(u_shadow));
+  float along=dot(q,sd), across=abs(q.x*sd.y-q.y*sd.x);
+  float shadow=smoothstep(.035+along*.05,.01,across)*step(0.,along)*smoothstep(.95,.7,along);
+  vec3 c=stone*sun*(1.-.65*shadow);
+  c=mix(c,vec3(.75,.5,.25)*.9,fill(length(q)-.05));             // bronze gnomon foot
+  return c;
+}
+
+// ---------- the three eras (world space, engraved) ----------
+vec3 mushroom(vec2 p){
+  float y=p.y;
+  vec3 sky=mix(vec3(.75,.3,.1),vec3(.02,.02,.05),smoothstep(.15,.5,y));
+  float t=u_reverse;
+  vec2 c=p-vec2(0.,.47);
+  float capN=fbm(c*9.+vec2(0.,t*.35))*.05;
+  float cap=length(c/vec2(.23,.11))-1.+capN*9.;
+  float stemW=.032+.012*fbm(vec2(p.y*14.,t*.4));
+  float stem=max(abs(p.x+.01*sin(p.y*20.+t))-stemW,max(p.y-.44,.18-p.y));
+  float skirt=length((p-vec2(0.,.34))/vec2(.085,.016))-1.+fbm(p*30.)*.6;
+  float d=min(min(cap*.08,stem),skirt*.03);
+  float cloud=1.-smoothstep(-.006,.006,d);
+  float under=smoothstep(.5,.36,y);
+  vec3 cc=mix(vec3(.62,.55,.5),vec3(1.6,.8,.3),under*.9)*(.6+.7*fbm(p*18.+t*.2));
+  vec3 col=mix(sky,cc,cloud);
+  col+=vec3(1.,.55,.2)*.8*exp(-length((p-vec2(0.,.2))*vec2(4.,8.)));  // fireball glow at the base
+  float tone=1.-clamp(dot(col,vec3(.3,.5,.2))*1.4,0.,1.);
+  return engrave(col,tone,p,vec3(.08,.04,.03));
+}
+
+float vitruvianSD(vec2 v){
+  float A=sdCap(v,vec2(0.,.34),vec2(0.,-.12),.1,.075);          // torso
+  A=min(A,sdCap(v,vec2(-.18,.36),vec2(-.82,.36),.045,.028));
+  A=min(A,sdCap(v,vec2(.18,.36),vec2(.82,.36),.045,.028));
+  A=min(A,sdCap(v,vec2(-.07,-.12),vec2(-.07,-.98),.065,.035));
+  A=min(A,sdCap(v,vec2(.07,-.12),vec2(.07,-.98),.065,.035));
+  return A;
+}
+float vitruvianSD2(vec2 v){
+  float B=sdCap(v,vec2(-.18,.36),vec2(-.87,.5),.045,.028);
+  B=min(B,sdCap(v,vec2(.18,.36),vec2(.87,.5),.045,.028));
+  B=min(B,sdCap(v,vec2(-.07,-.12),vec2(-.5,-.866),.065,.035));
+  B=min(B,sdCap(v,vec2(.07,-.12),vec2(.5,-.866),.065,.035));
+  return B;
+}
+vec3 vitruvian(vec2 p){
+  vec2 c=vec2(-.5,-.3); float s=.17;
+  vec2 v=(p-c)/s;
+  v+=.006*vec2(vn(v*9.),vn(v*9.+5.));
+  vec3 paper=vec3(.8,.7,.5)*(.8+.3*fbm(p*14.))-vec3(.1,.08,.04)*smoothstep(.4,.9,fbm(p*5.));
+  vec3 ink=vec3(.24,.14,.07);
+  float PXv=PX/s;
+  float lw=.012;
+  float m=0.;
+  m=max(m,1.-smoothstep(lw-PXv,lw+PXv,abs(length(v)-1.)));        // circle
+  vec2 sq=abs(v-vec2(0.,-.18))-vec2(.82);
+  float sqd=length(max(sq,0.))+min(max(sq.x,sq.y),0.);
+  m=max(m,1.-smoothstep(lw-PXv,lw+PXv,abs(sqd)));                 // square
+  float A=vitruvianSD(v), B=vitruvianSD2(v);
+  m=max(m,1.-smoothstep(lw*.8-PXv,lw*.8+PXv,abs(A)));
+  m=max(m,1.-smoothstep(lw*.8-PXv,lw*.8+PXv,abs(B)));
+  float head=length(v-vec2(0.,.53))-.1;
+  m=max(m,1.-smoothstep(lw-PXv,lw+PXv,abs(head)));
+  // mirror-script lines above
+  float row=abs(fract((v.y-1.1)/.09)-.5);
+  float scr=step(1.05,v.y)*step(v.y,1.42)*step(abs(v.x),.95)*step(row,.12)*step(.45,vn(vec2(v.x*22.,floor((v.y-1.1)/.09)*7.)));
+  m=max(m,scr*.7);
+  float shade=(1.-smoothstep(-.02,.02,min(A,B)))*.35;
+  vec3 col=paper;
+  col=engrave(col,shade,p,ink);
+  return mix(col,ink,m*.9);
+}
+
+vec3 settlement(vec2 p){
+  float hz=-.30+.025*fbm(vec2(p.x*5.,1.))-.02*(p.x-.5);
+  // a day, run backwards: the sun climbs out of the western horizon, crosses, sinks in the east
+  float ph=mix(-.25,PI+.25,u_day);
+  vec2 sun=vec2(.62,-.33)+vec2(cos(ph)*.2,sin(ph)*.16);
+  float el=sin(ph);
+  vec3 hor=mix(vec3(1.,.62,.3),vec3(.86,.82,.72),smoothstep(.25,.75,el));
+  vec3 zen=mix(vec3(.05,.09,.14),vec3(.36,.45,.55),smoothstep(.15,.8,el));
+  float night=1.-smoothstep(-.25,.05,el);
+  hor=mix(hor,vec3(.08,.1,.16),night); zen=mix(zen,vec3(.02,.03,.06),night);
+  vec3 sky=mix(hor,zen,smoothstep(hz,hz+.26,p.y));
+  float ds=length(p-sun);
+  sky+=vec3(1.,.8,.5)*(exp(-ds*28.)*.5+(1.-smoothstep(.016,.019,ds))*1.6)*smoothstep(-.1,.05,el);
+  float st=step(.992,h12(floor(p*300.)))*smoothstep(hz+.12,hz+.3,p.y)*(1.-smoothstep(-.05,.3,el));
+  sky+=vec3(1.)*st*.8;
+  vec3 col=sky;
+  float ground=step(p.y,hz);
+  col=mix(col,vec3(.07,.05,.04)*(.7+.6*fbm(p*20.)),ground);
+  // conical huts on the horizon
+  float huts=1e3;
+  for(int i=0;i<5;i++){ float x=.34+float(i)*.075+.02*h12(vec2(float(i),3.)); float hw=.03+.01*h12(vec2(float(i),7.)), hh=.03+.012*h12(vec2(float(i),9.));
+    vec2 q=p-vec2(x,hz-.004); float tri=max(-q.y,(abs(q.x)*hh/hw+q.y-hh)*.7);
+    huts=min(huts,tri); }
+  vec3 hutc=vec3(.1,.07,.05);
+  col=mix(col,hutc,fill(huts));
+  // fire and smoke (reversed time: smoke falls back into the fire)
+  vec2 fp=vec2(.5,hz+.004);
+  float fl=exp(-length((p-fp)*vec2(40.,26.)));
+  col+=vec3(1.4,.6,.15)*fl*1.6;
+  vec2 sp=p-fp; float t=u_reverse;
+  float plume=smoothstep(.02+sp.y*.25,0.,abs(sp.x-.04*sp.y*sin(sp.y*18.-t*1.5)*6.))*step(0.,sp.y)*smoothstep(.3,.0,sp.y);
+  plume*=.5+.6*fbm(vec2(sp.x*30.,sp.y*14.+t*.8));
+  col=mix(col,vec3(.35,.32,.3),clamp(plume,0.,1.)*.7);
+  float tone=1.-clamp(dot(col,vec3(.3,.5,.2))*1.5,0.,1.);
+  return engrave(col,tone*(1.-fl),p,vec3(.05,.04,.04));
+}
+
+// ---------- sector routing ----------
+float sectorOf(vec2 d){ float a=degrees(atan(d.y,d.x)); if(a<0.) a+=360.;
+  return (a>=30.&&a<150.)?0.:((a>=150.&&a<270.)?1.:2.); }
+vec3 underClock(vec2 q){ float s=sectorOf(q); return s==0.?quartz(q):(s==1.?mech(q):sundial(q)); }
+vec3 outerEra(vec2 p){ float s=sectorOf(p); return s==0.?mushroom(p):(s==1.?vitruvian(p):settlement(p)); }
+
+vec3 panorama(vec2 p, bool inside){
+  return inside ? underClock(p/u_R) : outerEra(p);
+}
+vec3 seen(vec2 p, bool inside){
+  if(u_focus>.995 && u_dizzy<.005) return panorama(p,inside);
+  vec3 acc=vec3(0.); float bl=(1.-u_focus)*.028;
+  vec2 dv=vec2(.022,.009)*u_dizzy*vec2(sin(u_time*5.3),cos(u_time*3.7));
+  for(int i=0;i<6;i++){ float a=float(i)*2.3999; vec2 o=vec2(cos(a),sin(a))*bl*sqrt((float(i)+.5)/6.);
+    vec2 pp=p+o+((i%2==0)?dv:-dv);
+    acc+=panorama(pp,inside); }
+  return acc/6.;
+}
+
+// ---------- planet phase (time runs backwards) ----------
+uniform float u_earth;   // 0 ceramic disk .. 1 modern Earth
+uniform float u_geo;     // 0 modern .. 1 molten (geological rewind)
+uniform float u_spin;    // Earth spin angle (decreasing)
+uniform vec3  u_moon;    // xy position, z radius
+uniform float u_mbreak;  // Moon -> debris cloud
+uniform float u_mang, u_mdist;
+uniform float u_dphase;  // debris converging onto the impact point
+uniform float u_dvis;
+uniform float u_ring;    // imploding shock ring radius
+uniform float u_ringA;
+uniform float u_merge;   // glow on the Theia/Earth seam
+uniform vec2  u_tvel;
+uniform float u_scan;    // scan line (screen y, -0.5..0.5); above it: vector display
+uniform float u_vec;     // vector display enabled
+uniform sampler2D u_ui;
+uniform float u_ui_on;
+uniform vec3 u_phos;
+
+const vec3 LDIR=vec3(-.65,.45,.62);
+vec3 moltenSurface(vec3 n){
+  vec3 np=n; np.xz*=rot(u_spin);
+  float f=fbm3(np*3.2), cr=1.-abs(fbm3(np*6.+7.)*2.-1.);
+  vec3 alb=mix(vec3(.10,.08,.07),vec3(.22,.17,.13),f);
+  float dif=max(dot(n,normalize(LDIR)),0.);
+  vec3 c=alb*(.03+1.1*dif);
+  c+=vec3(1.4,.45,.1)*pow(cr,14.)*(.6+.8*(1.-dif));
+  c+=vec3(1.,.5,.2)*.35*pow(1.-n.z,4.);
+  return c;
+}
+vec3 modernSurface(vec3 n){
+  vec3 np=n; np.xz*=rot(u_spin);
+  vec3 L=normalize(LDIR);
+  float land=fbm3(np*2.2+3.);
+  float ocean=smoothstep(.5,.48,land);
+  vec3 alb=mix(vec3(.28,.3,.17)*(.7+.6*fbm3(np*8.)),vec3(.015,.05,.13),ocean);
+  float cl=smoothstep(.55,.78,fbm3(np*3.5+vec3(0.,0.,u_spin*.25)+9.));
+  alb=mix(alb,vec3(.92),cl*.85);
+  float dif=max(dot(n,L),0.);
+  vec3 c=alb*(.015+1.15*dif);
+  c+=vec3(.9,.95,1.)*pow(max(dot(reflect(-L,n),vec3(0,0,1)),0.),40.)*ocean*(1.-cl)*.7;
+  c+=vec3(.3,.55,1.)*.55*pow(1.-n.z,3.)*(.25+dif);
+  return c;
+}
+vec3 planetSurface(vec2 q, float r){
+  vec3 n=vec3(q,sqrt(max(1.-r*r,0.)));
+  // geological rewind: oceans and continents give way to magma, patchily
+  float patch=fbm3(n*4.+1.);
+  float k=clamp(u_geo*1.25-.1+(patch-.5)*.5*(1.-abs(u_geo*2.-1.)),0.,1.);
+  return mix(modernSurface(n),moltenSurface(n),k);
+}
+vec3 moltenSection(vec2 q){
+  float r=length(q);
+  vec3 c=mix(vec3(2.4,1.7,.9),vec3(1.4,.45,.12),smoothstep(.1,.7,r));
+  c=mix(c,vec3(.25,.06,.03),smoothstep(.8,1.,r));
+  c*=.75+.5*fbm(q*8.+u_time*.3);
+  return c;
+}
+vec3 sphereBody(vec2 p, vec2 c, float rad, float seed, vec3 lo, vec3 hi){
+  vec2 q=(p-c)/rad; float r=length(q);
+  vec3 n=vec3(q,sqrt(max(1.-r*r,0.)));
+  float f=fbm3(n*4.+seed);
+  float cr=smoothstep(.62,.66,vn3(n*7.+seed))*.4;
+  return mix(hi,lo,cr)*mix(.7,1.2,f)*(.03+1.1*max(dot(n,normalize(LDIR)),0.));
+}
+vec3 theia(vec2 p){
+  if(length(p-u_tpos)>u_trad) return vec3(0.);
+  vec3 c=sphereBody(p,u_tpos,u_trad,11.,vec3(.2,.17,.15),vec3(.4,.34,.28));
+  vec2 q=(p-u_tpos)/u_trad; vec2 toHit=normalize(u_hit-u_tpos);
+  c+=vec3(1.6,.6,.18)*u_theat*(pow(max(dot(q,toHit),0.),3.)*1.3+.12);
+  return c;
+}
+vec3 stars(vec2 p){
+  vec2 g=floor(p*140.); float h=h12(g);
+  float s=step(.985,h)*(1.-smoothstep(0.,.35,length(fract(p*140.)-.5)))*(.4+.6*h12(g+3.));
+  return vec3(.9,.92,1.)*s*u_stars;
+}
+// Moon breaking into a ring, the ring spiralling back into the impact point
+vec2 debrisPos(float i, float ph){
+  float r1=h12(vec2(i,1.)), r2=h12(vec2(i,2.)), r3=h12(vec2(i,3.));
+  float spread=(r1-.5)*TAU*pow(u_mbreak,.7);
+  float th0=u_mang+spread;
+  float rho=u_mdist*(1.+(r2-.5)*.3*u_mbreak);
+  float e=clamp((ph-r3*.35)/.65,0.,1.); e=e*e*(3.-2.*e);
+  float th=atan(u_hit.y,u_hit.x);
+  float dl=mod(th0-th,TAU)+PI;                     // spiral in, clockwise
+  float a=th0-e*dl;
+  float rr=mix(rho,length(u_hit),pow(e,1.3));
+  return vec2(cos(a),sin(a))*rr;
+}
+vec3 debris(vec2 p){
+  if(u_dvis<=0.) return vec3(0.);
+  vec3 c=vec3(0.);
+  float heat=smoothstep(.3,1.,u_dphase);
+  vec3 col=mix(vec3(.8,.62,.45),vec3(2.2,1.,.35),heat)*.8;
+  for(int k=0;k<140;k++){
+    float i=float(k);
+    vec2 a=debrisPos(i,u_dphase), b=debrisPos(i,max(u_dphase-.012,0.));
+    float d=sdSeg(p,b,a);
+    float sz=.0022+.0035*h12(vec2(i,5.));
+    c+=col*exp(-d*d/(sz*sz))*u_dvis*(.6+.6*h12(vec2(i,6.)));
+  }
+  return c;
+}
+
+// ---------- vector display ----------
+float lineAA(float d, float w){ return 1.-smoothstep(w*.5,w*.5+PX*1.2,d); }
+// the simulator's 3D orbital plane: camera 1 unit above it, pitched down; screen centre = proto-Earth's place
+const float VP=.30, VF=1.6;
+const vec3 VRO=vec3(0.,1.,-2.6);
+vec3 vFw(){ return vec3(0.,-sin(VP),cos(VP)); }
+vec3 vUp(){ return vec3(0.,cos(VP),sin(VP)); }
+vec3 vEarth(){ vec3 f=vFw(); return VRO+f*(-VRO.y/f.y); }
+vec3 vSun(){ return vEarth()+vec3(-2.6,0.,11.); }
+vec2 vProj(vec3 P){ vec3 v=P-VRO; return vec2(v.x,dot(v,vUp()))/dot(v,vFw())*VF; }
+vec3 vectorView(vec2 p){
+  vec3 ph=u_phos;
+  float I=0.;
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  vec3 fw=vFw(), up=vUp(), rt=vec3(1.,0.,0.);
+  vec3 rd=normalize(fw*VF+uv.x*rt+uv.y*up);
+  float below=step(rd.y,-1e-3);
+  float tp=-VRO.y/min(rd.y,-1e-3);
+  vec3 P=VRO+rd*tp;
+  float fade=below*exp(-tp*.07);
+  // grid on the orbital plane
+  vec2 g=P.xz/.5, fg=abs(fract(g)-.5), wg=fwidth(g)+1e-5;
+  float grid=max(1.-smoothstep(0.,wg.x*1.3,.5-fg.x),1.-smoothstep(0.,wg.y*1.3,.5-fg.y));
+  I+=.07*grid*fade;
+  // the orbits: proto-Earth's (solid), Theia's co-orbital path (dashed)
+  vec3 S=vSun(), E=vEarth();
+  float Ro=length(E.xz-S.xz);
+  float dO=length(P.xz-S.xz)-Ro;
+  I+=.55*(1.-smoothstep(0.,fwidth(dO)*1.6,abs(dO)))*fade;
+  vec2 Sc2=S.xz+vec2(.35,-.25);
+  float dT=length(P.xz-Sc2)-Ro*1.015;
+  float angT=atan(P.z-Sc2.y,P.x-Sc2.x);
+  I+=.4*(1.-smoothstep(0.,fwidth(dT)*1.6,abs(dT)))*step(.5,fract(angT*180./PI))*fade;
+  // the Sun, far off
+  vec2 su=vProj(S);
+  float ds=length(uv-su);
+  I+=lineAA(abs(ds-.016),PX*1.3)+.6*lineAA(abs(ds-.03),PX)*step(.5,fract(atan(uv.y-su.y,uv.x-su.x)*12./TAU));
+  I+=1.4*exp(-ds*90.);
+  for(int k=0;k<8;k++){ float an=float(k)*TAU/8.; vec2 dv=vec2(cos(an),sin(an)); I+=.5*lineAA(sdSeg(uv,su+dv*.038,su+dv*.055),PX); }
+  // horizon and a few catalogue stars above it
+  float hy=sin(VP)*VF/cos(VP);
+  I+=.35*lineAA(abs(uv.y-hy),PX);
+  vec2 sg=floor(uv*60.); float sh=h12(sg+7.);
+  I+=step(hy,uv.y)*step(.975,sh)*lineAA(length(fract(uv*60.)-.5)/60.,PX*1.5)*.6;
+  // proto-Earth: wireframe globe with its gap
+  float r=length(p), a=atan(p.y,p.x), d=wrapA(a-u_gap);
+  float angD=(u_half-abs(d))*r;
+  float sd=u_half<=1e-4 ? r-u_R : max(r-u_R,angD);
+  if(sd<0.) I*=.15;                                    // the globe hides what lies behind it
+  I+=lineAA(abs(sd),PX*1.4);
+  if(sd<0.){
+    vec2 q=p/u_R; float z=sqrt(max(1.-dot(q,q),0.));
+    float lon=(atan(q.x,z)+u_spin)/(PI/6.), lat=asin(clamp(q.y,-1.,1.))/(PI/8.);
+    float ml=abs(fract(lon)-.5), ll=abs(fract(lat)-.5);
+    I+=.4*smoothstep(.5-fwidth(lon)*1.3,.5,ml);
+    I+=.4*smoothstep(.5-fwidth(lat)*1.3,.5,ll);
+  }
+  float dashA=step(.5,fract(a*36./TAU));
+  I+=.3*lineAA(abs(r-u_R*2.),PX)*dashA;                // Roche limit
+  // Theia, and its velocity in the forward simulation: toward Earth (the playback runs backwards)
+  if(u_trad>0.){
+    I+=lineAA(abs(length(p-u_tpos)-u_trad),PX*1.4);
+    vec2 v=normalize(u_hit-u_tpos), n=vec2(-v.y,v.x);
+    vec2 s0=u_tpos+v*u_trad*1.25, s1=s0+v*.1;
+    I+=.9*lineAA(sdSeg(p,s0,s1),PX*1.2);
+    I+=.9*lineAA(sdSeg(p,s1,s1-v*.022+n*.013),PX*1.2)+.9*lineAA(sdSeg(p,s1,s1-v*.022-n*.013),PX*1.2);
+    vec2 tr=u_tpos-u_hit; float L=max(length(tr),1e-4);
+    float along=dot(p-u_hit,tr/L);
+    I+=.55*lineAA(sdSeg(p,u_hit,u_tpos-tr/L*u_trad),PX)*step(.5,fract(along/.018));
+  }
+  vec2 hq=p-u_hit;
+  float ch=min(sdSeg(hq,vec2(.012,0.),vec2(.035,0.)),sdSeg(hq,vec2(-.012,0.),vec2(-.035,0.)));
+  ch=min(ch,min(sdSeg(hq,vec2(0.,.012),vec2(0.,.035)),sdSeg(hq,vec2(0.,-.012),vec2(0.,-.035))));
+  I+=.9*lineAA(ch,PX*1.2);
+  I+=texture(u_ui,gl_FragCoord.xy/u_res).a*u_ui_on*1.3;
+  float flick=.96+.04*sin(u_time*120.);
+  return ph*(I*1.35*flick)+ph*.012;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  PX=u_zoom/u_res.y;
+  vec2 p=uv*u_zoom+u_cam;
+  float r=length(p), a=atan(p.y,p.x);
+  float d=wrapA(a-u_gap);
+  float R=u_R;
+  float half_=u_half;
+  float angD=(half_-abs(d))*r;
+  float sd=max(r-R, angD);
+  if(half_>=PI-1e-3) sd=1e3;
+  if(half_<=1e-4) sd=r-R;
+  float inDisk=fill(sd);
+  bool within=r<R;
+
+  vec3 col=vec3(.004)+stars(p);
+  if(!within && u_token>0.) col=mix(col,tokens(p),u_token);
+  if(!within && u_earth<.999){
+    vec3 era=seen(p,false)*u_expo;
+    float wedge=smoothstep(0.,.05,angD);
+    float fall=smoothstep(R,R+.02,r)*(1.-smoothstep(R+.25,R+.85,r)*.85);
+    col=mix(col,era,wedge*fall*clamp(1.-u_earth*2.5,0.,1.)*step(u_half,PI-1e-3));
+  }
+  if(within){
+    vec3 under=vec3(0.);
+    if(u_token>0.) under+=tokens(p)*u_token;
+    if(u_token<1.){
+      vec3 pan=seen(p,true)*u_expo;
+      under+=mix(pan,moltenSection(p/R),u_planet)*(1.-u_token);
+    }
+    if(u_earth>0.){ vec2 q=p/R; under=mix(under,planetSurface(q,min(length(q),1.)),u_earth*(1.-u_planet)); }
+    float ao=smoothstep(0.,.035,angD)*smoothstep(0.,.03,R-r);
+    under*=mix(.25,1.,ao);
+    col=under;
+  }
+  if(inDisk>0.){
+    vec2 q=p/R; float qr=min(length(q),1.);
+    vec3 dc=vec3(.028,.028,.03);
+    vec2 hl=q-vec2(-.35,.42);
+    dc+=vec3(.09)*exp(-dot(hl,hl)*5.);
+    dc+=vec3(.018)*(.5+.5*sin(qr*R*1400.))*abs(sin(a-2.3));
+    dc+=vec3(.85,.5,.25)*stroke(r-R*.82,.0012)*step(PI*.001,-angD)*.9;
+    float rimW=.011;
+    float rim=smoothstep(-rimW-PX,-rimW+PX,sd);
+    vec2 e=vec2(.001,0.);
+    float s1=max(length(p+e.xy)-R,(half_-abs(wrapA(atan(p.y,p.x+e.x)-u_gap)))*length(p+e.xy));
+    float s2=max(length(p+e.yx)-R,(half_-abs(wrapA(atan(p.y+e.x,p.x)-u_gap)))*length(p+e.yx));
+    vec2 nrm=normalize(vec2(s1-sd,s2-sd)+1e-6);
+    float lit=.55+.45*dot(nrm,normalize(vec2(-.6,.8)));
+    vec3 rimc=vec3(.86,.85,.82)*lit+vec3(.3)*pow(max(dot(nrm,normalize(vec2(-.6,.8))),0.),8.);
+    dc=mix(dc,rimc,rim*(1.-u_earth));
+    vec3 pl=planetSurface(q,qr);
+    pl=mix(pl,vec3(1.3,.5,.15),rim*.6*u_planet*step(1e-4,half_)*smoothstep(-.012,0.,angD));
+    dc=mix(dc,pl,u_earth);
+    col=mix(col,dc,inDisk);
+  }
+  if(u_moon.z>0.){
+    float md=length(p-u_moon.xy)-u_moon.z;
+    vec3 mc=sphereBody(p,u_moon.xy,u_moon.z,3.,vec3(.35,.34,.33),vec3(.62,.6,.57));
+    float keep=step(u_mbreak*1.1,vn3(vec3((p-u_moon.xy)/u_moon.z*3.,1.))+.05);
+    col=mix(col,mc,fill(md)*keep);
+  }
+  col+=debris(p);
+  if(u_ringA>0.){
+    float dh=length(p-u_hit);
+    col+=vec3(1.,.7,.4)*exp(-pow((dh-u_ring)/.006,2.))*u_ringA*1.5;
+  }
+  if(u_flash>0.) col+=vec3(2.,1.5,1.)*u_flash*exp(-length(p-u_hit)*16.);
+  if(u_melt>0.){
+    float gapZone=(1.-smoothstep(R-.004,R+.004,r))*smoothstep(-.02,.02,(u_half+.02-abs(d))*r);
+    col+=vec3(1.8,.7,.2)*gapZone*u_melt*(.5+.8*fbm(vec2(a*6.,r*30.)+u_time*.6));
+  }
+  if(u_trad>0.){
+    float td=length(p-u_tpos)-u_trad;
+    col=mix(col,theia(p),fill(td));
+    col+=vec3(1.8,.8,.25)*exp(-abs(td)*80.)*u_merge*1.4;
+  }
+  if(u_vec>0.){
+    float sy=uv.y-u_scan;
+    if(sy>0.) col=vectorView(p);
+    col+=mix(u_phos,vec3(1.),.3)*(exp(-abs(sy)*900.)*3.+exp(-max(sy,0.)*30.)*.08*step(0.,sy));
+  }
+  fragColor=vec4(col*u_weight,1.);
+}

@@ -1,0 +1,36 @@
+{
+  "release_velocity_error": 2.7402555532885e-05,
+  "max_previous_shot_screen_error_px": 0.0,
+  "screen_bounds_px": [
+    [
+      752.375921127484,
+      396.75106785116293
+    ],
+    [
+      1683.0519321096535,
+      708.4363073494484
+    ]
+  ],
+  "minimum_stream_boundary_gap": 0.15000034166510082,
+  "near_boundary_relative_speed": 3.203108610132315e-06,
+  "pre_transition_render_max_pixel_difference": [
+    0,
+    0,
+    0
+  ],
+  "checks": {
+    "continuous_release_velocity": true,
+    "leaves_actual_plane_edge": true,
+    "previous_shot_preserved": true,
+    "world_motion_continues_right": true,
+    "ball_visible_throughout": true,
+    "boundary_perpendicular_to_flow": true,
+    "boundary_grows_from_recipient": true,
+    "point_count_preserved": true,
+    "full_cross_section_covered_before_contact": true,
+    "point_front_does_not_cross_boundary": true,
+    "asymptotic_slowdown": true,
+    "previous_shot_pixels_match": true
+  },
+  "passed": true
+}

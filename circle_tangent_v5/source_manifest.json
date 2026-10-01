@@ -1,0 +1,42 @@
+[
+  {
+    "original": "claude/engine/gl.py",
+    "sha256": "e2e625bffff24f43e61877ec130afd13da920c39959c64ecdf36001b66c9814a"
+  },
+  {
+    "original": "claude/film/shots/s03_self.py",
+    "sha256": "99d86d9eb0c08a589193635b5d17bb6b0047606bed0eb84b596244ce096c8d2a"
+  },
+  {
+    "original": "claude/film/master.py",
+    "sha256": "786ad9eacf1bb66c6bbd7c051f28237732dc70fd196425800516bab9eaaba952"
+  },
+  {
+    "original": "claude/film/film_full_v1_1080p.mp4",
+    "sha256": "96cca7d9e6fe7045985b83f2291054d8bc80e931612202c5c761fc9fa63e3257"
+  },
+  {
+    "original": "Mili - world.execute (me) ;.mp3",
+    "sha256": "3683956e43df0e1252d93ca2339d2d26948b8112813f703ce2f827f004191785"
+  },
+  {
+    "original": "circle_tangent_v4/render.py",
+    "sha256": "f1f48e8510c35ee733174f4021b67fb52bfad175364f1debf4d1fb3382a0b6cd"
+  },
+  {
+    "original": "circle_tangent_v4/common.glsl",
+    "sha256": "497b96bd19ed90d7582b1e19ad36c55fdcd148c43d20231ace9b596d23d696b4"
+  },
+  {
+    "original": "circle_tangent_v4/scene.glsl",
+    "sha256": "164285ddbbd3576bb38a3a55950549f49e549253a961e95d8828ea86b40e1a59"
+  },
+  {
+    "original": "circle_tangent_v4/points.vert",
+    "sha256": "5ac736248300f544b44486bb9a9a5a51b2f74cdcf7939ce94cba90d4c02a777f"
+  },
+  {
+    "original": "circle_tangent_v4/circle_tangent_v4_1080p60.mp4",
+    "sha256": "124b1b19e978620eef95aadff6fa6c84ea4be34550f61aa64d397d9ad64120e0"
+  }
+]

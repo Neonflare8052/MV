@@ -1,0 +1,200 @@
+"""s01 · 0:00–0:16  boot: START -> PROTECTION -> OBJECT CREATION -> INITIALIZATION -> forward pass -> SIMULATION.
+Graphite, ceramic white, copper. You type the first command; the model receives it."""
+import math
+from PIL import Image, ImageDraw, ImageFont
+
+T_PWR, T_REM, T_PROT, T_LAY, T_BEGIN, T_OBJ = .100, 1.740, 2.920, 3.873, 5.491, 6.380
+T_FILL, T_INIT, T_SET, T_LETS, T_SIM = 7.446, 10.091, 11.095, 12.906, 13.891
+NL = 6                                   # layers
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec3 u_cam, u_look; uniform float u_fov;
+uniform float u_power;      // copper power line 0..1
+uniform float u_3d;         // 0: flat prompt only, 1: the matrix / layers
+uniform float u_inZ;        // z of the input matrix
+uniform float u_inA;        // input matrix build 0..1 (rows appear)
+uniform float u_layersA;    // layers visible
+uniform float u_sweep;      // initialization sweep position (layer units), <0 none
+uniform float u_act;        // forward-pass activation position (layer units)
+uniform float u_outA;       // output head
+uniform sampler2D u_ui;
+out vec4 fragColor;
+const float PITCH=.1, ZS=.62;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float sdBox(vec3 p, vec3 b){ vec3 q=abs(p)-b; return length(max(q,0.))+min(max(q.x,max(q.y,q.z)),0.); }
+float sdRBox(vec3 p, vec3 b, float r){ return sdBox(p,b-r)-r; }
+vec2 opU(vec2 a, vec2 b){ return a.x<b.x?a:b; }
+// a grid of ceramic tiles (cols x rows) centred at c in the x-y plane
+float tiles(vec3 p, vec3 c, vec2 n, out vec2 id){
+  vec3 q=p-c; vec2 h=(n-1.)*.5;
+  id=clamp(floor(q.xy/PITCH+h+.5),vec2(0.),n-1.);
+  q.xy-=(id-h)*PITCH;
+  return sdRBox(q,vec3(.036,.036,.012),.01);
+}
+vec2 G_ID; float G_L;
+vec2 map(vec3 p){
+  vec2 r=vec2(p.y+1.2,1.);                                          // floor far below
+  vec2 id;
+  if(u_layersA>0.){
+    for(int k=0;k<6;k++){
+      float z=-float(k)*ZS;
+      float lift=(1.-u_layersA)*(2.+float(k));
+      vec3 c=vec3(0.,-lift,z);
+      float d=tiles(p,c,vec2(8.,12.),id);
+      if(d<r.x){ r=vec2(d,2.); G_ID=id; G_L=float(k); }
+      float plate=sdRBox(p-c-vec3(0.,0.,-.03),vec3(.43,.63,.008),.01);
+      r=opU(r,vec2(plate,3.));
+      float rails=min(sdBox(p-c-vec3(-.45,0.,-.02),vec3(.006,.66,.006)),sdBox(p-c-vec3(.45,0.,-.02),vec3(.006,.66,.006)));
+      r=opU(r,vec2(rails,4.));
+    }
+  }
+  if(u_inA>0.){
+    float d=tiles(p,vec3(0.,0.,u_inZ),vec2(5.,12.),id);
+    if(d<r.x){ r=vec2(d,5.); G_ID=id; G_L=-1.; }
+    r=opU(r,vec2(min(sdBox(p-vec3(-.28,-.66,u_inZ-.02),vec3(.004,.004,1.2)),sdBox(p-vec3(.28,-.66,u_inZ-.02),vec3(.004,.004,1.2))),4.));  // guide rails
+  }
+  return r;
+}
+vec3 normal(vec3 p){ vec2 e=vec2(.0008,0.);
+  return normalize(vec3(map(p+e.xyy).x-map(p-e.xyy).x,map(p+e.yxy).x-map(p-e.yxy).x,map(p+e.yyx).x-map(p-e.yyx).x)); }
+vec3 shade(vec3 p, vec3 rd, float m){
+  vec3 n=normal(p);
+  vec3 L=normalize(vec3(-.4,.8,.6));
+  float dif=max(dot(n,L),0.), amb=.12+.1*n.y;
+  vec3 alb=vec3(.03); float sp=.2; vec3 em=vec3(0.);
+  if(m>1.5&&m<2.5 || m>4.5){                                       // ceramic tile
+    alb=vec3(.82,.81,.78);
+    float hsh=h12(G_ID+G_L*7.1);
+    float on=0.;
+    if(u_inA>0.&&m>4.5){ on=step(G_ID.y/12.,u_inA)*(.3+.7*step(.45,hsh)); alb*=mix(.25,1.,step(G_ID.y/12.,u_inA)); }
+    if(m<2.5){
+      float sw=exp(-pow((G_L-u_sweep)*2.2,2.));                     // initialization sweep
+      float ac=exp(-pow((G_L-u_act)*1.6,2.))*step(.55,hsh);          // activation travelling
+      em+=vec3(1.,.95,.85)*sw*.8+vec3(1.,.72,.4)*ac*1.6;
+    }
+    em+=vec3(1.,.95,.9)*on*.35;
+    sp=.6;
+  } else if(m<3.5){ alb=vec3(.03,.03,.035); sp=.3;
+  } else if(m<4.5){ alb=vec3(.65,.4,.2); sp=1.;
+  } else { alb=vec3(.02); }
+  vec3 col=alb*(vec3(1.,.95,.88)*1.3*dif+amb*vec3(.5,.55,.6))+em;
+  col+=vec3(1.)*sp*pow(max(dot(n,normalize(L-rd)),0.),48.)*dif;
+  return col;
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  vec3 col=vec3(.006);
+  if(u_3d>0.){
+    vec3 fw=normalize(u_look-u_cam), rt=normalize(cross(fw,vec3(0,1,0))), up=cross(rt,fw);
+    vec3 rd=normalize(fw+(uv.x*rt+uv.y*up)*2.*tan(u_fov*.5)); vec3 ro=u_cam;
+    float t=0.; vec2 h;
+    for(int i=0;i<160;i++){ h=map(ro+rd*t); if(h.x<.0005||t>12.) break; t+=h.x*.9; }
+    if(t<12.&&h.y>1.5){ col=shade(ro+rd*t,rd,h.y); col*=exp(-t*.08); }
+  }
+  // copper power line
+  float pl=abs(uv.y+.28)-.0016; float along=(uv.x+.9)/1.8;
+  float line=(1.-smoothstep(0.,.0025,pl))*step(along,u_power)*(1.-u_3d);
+  col+=vec3(1.,.62,.3)*line*1.4+vec3(1.,.55,.25)*exp(-abs(uv.y+.28)*90.)*.25*step(along,u_power)*(1.-u_3d);
+  col+=vec3(1.2,.8,.45)*exp(-length(uv-vec2(-.9+1.8*u_power,-.28))*60.)*step(.01,u_power)*step(u_power,.99)*2.;
+  vec4 ui=texture(u_ui,gl_FragCoord.xy/u_res);
+  col=mix(col,ui.rgb,ui.a);
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+
+POST = dict(u_bloom=.5, u_ca=.006)
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, x): return tuple(p + (q - p) * x for p, q in zip(a, b))
+
+
+def params(t):
+    p = dict(u_power=outc((t - T_PWR) / .8), u_3d=1. if t >= T_LAY else 0.)
+    # the input matrix: built on "Lay down your pieces", slides into layer 0 after OBJECT CREATION
+    p['u_inA'] = clamp((t - T_LAY - .35) / 2.2) if t < T_FILL + .8 else 0.
+    p['u_inZ'] = 1.0 - 1.0 * ease((t - T_OBJ) / 1.0)
+    p['u_layersA'] = outc((t - T_FILL + .1) / 1.2)
+    p['u_sweep'] = -3. + 9. * clamp((t - T_INIT) / .7) if T_INIT <= t < T_INIT + .8 else -9.
+    p['u_act'] = -1. + 7.5 * clamp((t - T_SET) / (T_SIM - T_SET)) if t >= T_SET else -9.
+    p['u_outA'] = ease((t - T_LETS) / .4)
+    if t < T_FILL:
+        cam, look, fov = (0., .02, 3.35), (0., 0., .6), 30
+    elif t < T_SET:
+        x = ease((t - T_FILL) / (T_INIT - T_FILL + .6))
+        cam = lerp((0., .02, 3.35), (2.1, .95, 1.9), x); look = lerp((0., 0., .6), (0., 0., -1.4), x); fov = 34
+    else:
+        x = ease((t - T_SET) / (16. - T_SET))
+        cam = lerp((2.1, .95, 1.9), (2.3, .45, -1.2), x); look = lerp((0., 0., -1.4), (-.3, 0., -3.1), x); fov = 34
+    p.update(u_cam=cam, u_look=look, u_fov=math.radians(fov))
+    return p
+
+
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+_cache = {}
+
+
+def _blank(w, h):
+    if (w, h) not in _cache: _cache[(w, h)] = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    return _cache[(w, h)]
+
+
+def textures(t, w, h):
+    if T_LAY + .6 < t < T_LETS - .1:
+        return {'u_ui': _blank(w, h)}
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    if t < T_LAY + .6:
+        # the prompt: you type START
+        f = ImageFont.truetype(FONT, int(56 * s))
+        typed = 'START'[:int(clamp((t - .9) / .55) * 5)]
+        cur = '▌' if (t * 2.2) % 1 < .6 or (0.9 < t < 1.5) else ' '
+        if t > T_REM - .05: cur = ''
+        txt = '> ' + typed + cur
+        cx, cy = w / 2, h * .46
+        tw = d.textlength('> START▌', font=f)
+        a = int(255 * (1 - clamp((t - T_LAY - .2) / .4)))
+        d.text((cx - tw / 2, cy - 30 * s), txt, font=f, fill=(225, 222, 214, a))
+        # PROTECTION: a ceramic frame closes around the input
+        k = outc((t - T_REM - .3) / (T_PROT - T_REM - .3))
+        if k > 0:
+            fw, fh = 520 * s, 150 * s
+            gx, gy = (1 - k) * 700 * s, (1 - k) * 380 * s
+            col = (222, 219, 210, a)
+            lw = int(6 * s)
+            d.line([(cx - fw / 2 - gx, cy - fh / 2 - gy), (cx + fw / 2 + gx, cy - fh / 2 - gy)], fill=col, width=lw)
+            d.line([(cx - fw / 2 - gx, cy + fh / 2 + gy), (cx + fw / 2 + gx, cy + fh / 2 + gy)], fill=col, width=lw)
+            d.line([(cx - fw / 2 - gx, cy - fh / 2 - gy), (cx - fw / 2 - gx, cy + fh / 2 + gy)], fill=col, width=lw)
+            d.line([(cx + fw / 2 + gx, cy - fh / 2 - gy), (cx + fw / 2 + gx, cy + fh / 2 + gy)], fill=col, width=lw)
+            if t > T_PROT:
+                f2 = ImageFont.truetype(FONT, int(20 * s))
+                d.text((cx - fw / 2, cy + fh / 2 + 16 * s), 'input · sealed', font=f2, fill=(200, 140, 80, a))
+        return {'u_ui': img}
+    # output head: candidates with probability bars, SIMULATION chosen
+    f = ImageFont.truetype(FONT, int(30 * s)); f2 = ImageFont.truetype(FONT, int(22 * s))
+    cands = [('SIMULATION', .83), ('STIMULATION', .07), ('SIMULACRUM', .04), ('SIMILAR', .03), ('SILENCE', .01)]
+    a0 = ease((t - T_LETS) / .4)
+    chosen = clamp((t - T_SIM) / .25)
+    x0, y0 = w * .64, h * .30
+    d.rectangle((x0 - 30 * s, y0 - 100 * s, w - 20 * s, y0 + 5 * 58 * s + 20 * s), fill=(8, 8, 9, int(215 * a0)))
+    for i, (word, pr) in enumerate(cands):
+        y = y0 + i * 58 * s
+        fade = 1 - chosen * (i > 0) * .85
+        a = int(255 * a0 * fade)
+        grow = outc((t - T_LETS - .1 * i) / .6)
+        colw = (236, 232, 222, a) if i == 0 else (180, 176, 168, a)
+        d.text((x0, y), word, font=f, fill=colw)
+        bx = x0 + 250 * s
+        d.rectangle((bx, y + 10 * s, bx + 220 * s, y + 24 * s), outline=(70, 68, 64, a))
+        d.rectangle((bx, y + 10 * s, bx + 220 * s * pr * grow, y + 24 * s), fill=(214, 140, 72, a) if i == 0 else (120, 116, 110, a))
+        d.text((bx + 232 * s, y + 2 * s), f'{pr * grow:.2f}', font=f2, fill=colw)
+    if chosen > 0:
+        y = y0 - 70 * s
+        d.text((x0, y), '▸ ' + 'SIMULATION', font=ImageFont.truetype(FONT, int(40 * s)), fill=(240, 236, 226, int(255 * chosen)))
+    fade_all = 1 - clamp((t - 15.4) / .6)
+    if fade_all < 1:
+        img.putalpha(img.getchannel('A').point(lambda v: int(v * fade_all)))
+    return {'u_ui': img}

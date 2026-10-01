@@ -1,0 +1,312 @@
+"""s10 · 1:58.333–2:05.708  FRAGMENTS → DISHEARTENED (v2).
+The terminal cursor becomes the gap ring. Around it a heptagon; on each corner a fragment of the journey.
+Where the gap looks, the corner is cut off (corner cutting) and its fragment turns to sand; on FRAGMENTS the rest
+go and the outline converges to a perfect, empty circle — the rounder, the more it has lost.
+Behind: scrolling draft pages — Dickinson's "Heart, we will forget him" underneath, written over with the
+arithmetic of π. The ring tries to close; a thrown pen streaks the page; a blade slashes "Heart"; the ring snaps open."""
+import math
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+
+T3 = (Path(__file__).resolve().parents[2] / 'tests' / 't03_fragments' / 'scene.glsl').read_text(encoding='utf-8')
+FRAG_GLSL = T3[T3.index('float gearSD('):T3.index('// dissolve into sand')]
+FRAG_GLSL = FRAG_GLSL[:FRAG_GLSL.index('vec2 fragPos(int i)')]
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform float u_cursor, u_ringA, u_R, u_gap, u_half;
+uniform vec2  u_poly[64]; uniform int u_n; uniform float u_polyA;
+uniform vec2  u_fpos[7]; uniform float u_erase[7]; uniform float u_fragA;
+uniform float u_keep, u_wscale, u_cur, u_sel;
+uniform vec3 u_lines[40]; uniform int u_nl; uniform vec2 u_hx;   // lines: (centre y, x0, x1) in page units; Heart's x0, x1
+uniform float u_scroll, u_overA, u_heartA, u_ink, u_slash, u_split, u_heart, u_snap;
+uniform sampler2D u_under, u_over, u_word;
+out vec4 fragColor;
+#define PI 3.14159265
+#define TAU 6.28318531
+float PX;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.03+1.7; a*=.5; } return s; }
+mat2 rot(float a){ float c=cos(a),s=sin(a); return mat2(c,s,-s,c); }
+float wrapA(float a){ return mod(a+PI,TAU)-PI; }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return length(pa-ba*h); }
+float sdCap(vec2 p, vec2 a, vec2 b, float ra, float rb){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return length(pa-ba*h)-mix(ra,rb,h); }
+float sdBox(vec2 p, vec2 b){ vec2 d=abs(p)-b; return length(max(d,0.))+min(max(d.x,d.y),0.); }
+float line(float d, float w){ return 1.-smoothstep(w-PX,w+PX,d); }
+''' + FRAG_GLSL + r'''
+vec4 dissolving(int i, vec2 p){
+  float e=u_erase[i];
+  if(e>=1.) return vec4(0.);
+  vec2 c=u_fpos[i]; float s=.05;
+  vec2 q=(p-c)/s;
+  if(length(q)>3.2) return vec4(0.);
+  float n=vn(q*7.)*.6+vn(q*23.)*.4;
+  float keep=smoothstep(e*1.25-.08,e*1.25,n);
+  vec4 f=fragment(i,q)*keep;
+  float edge=(1.-smoothstep(0.,.08,abs(n-e*1.25)))*step(.001,e);
+  f.rgb+=vec3(1.,.9,.75)*edge*fragment(i,q).a*1.5;
+  vec2 out_=normalize(c+vec2(1e-4));
+  vec4 g=fragment(i,q-out_*e*1.5-vec2(vn(q*3.+7.)-.5,vn(q*3.+1.)-.5)*e*1.2);
+  float grain=step(.8,h12(floor(p*u_res.y*.5)))*(1.-keep);
+  f.rgb+=g.rgb*grain*(1.-e)*step(.001,e)*1.4;
+  return f*u_fragA;
+}
+float RY, RX0, RX1;                 // the line being read: screen y, x extent
+void reader(){
+  float v=1.-fract(-.4*.31+.5+u_scroll);                   // page coordinate (from the top) under the reading head
+  float best=1e3; int bi=0;
+  for(int i=0;i<40;i++){ if(i>=u_nl) break; float d=abs(u_lines[i].x-v); d=min(d,1.-d); if(d<best){ best=d; bi=i; } }
+  vec3 L=u_lines[bi];
+  float py=(1.-L.x-.5-u_scroll)/.31;
+  py+=floor((-.4-py)*.31+.5)/.31;                           // the repeat of the page nearest the head
+  RY=py;
+  RX0=mix((L.y-.5)/.62,(u_hx.x-.5)/.62,u_sel); RX1=mix((L.z-.5)/.62,(u_hx.y-.5)/.62,u_sel);
+}
+vec3 cursors(vec2 uv){
+  if(u_cur<=0.) return vec3(0.);
+  float g=0.;
+  for(int s=0;s<2;s++){
+    float x=s==0?RX0-.014:RX1+.014, dir=s==0?1.:-1.;
+    g+=line(sdSeg(uv,vec2(x,RY-.03),vec2(x,RY+.03)),.0013);
+    g+=line(sdSeg(uv,vec2(x,RY+.03),vec2(x+dir*.008,RY+.03)),.0013)+line(sdSeg(uv,vec2(x,RY-.03),vec2(x+dir*.008,RY-.03)),.0013);
+  }
+  return vec3(.95,.9,.82)*g*u_cur;
+}
+vec3 paper(vec2 uv){
+  // the draft pages, split along the slash
+  vec2 sd=normalize(vec2(1.,-.35));
+  vec2 nn=vec2(-sd.y,sd.x);
+  float side=sign(dot(uv-vec2(0.,-.4),nn));
+  vec2 p=uv-nn*side*u_split*.03;
+  vec3 c=vec3(.62,.5,.36)*(.55+.6*fbm(p*4.))*.085;
+  vec2 tuv=vec2(p.x*.62+.5,fract(p.y*.62*.5+.5+u_scroll));
+  float under=texture(u_under,tuv).a;
+  float over=texture(u_over,tuv).a;
+  float read=1.+.9*u_cur*(1.-u_keep)*(1.-smoothstep(.022,.034,abs(p.y-RY)));
+  c+=vec3(.55,.2,.12)*.085*under*(.35+.65*u_overA)*(1.-u_keep)*read;
+  c+=vec3(.86,.8,.68)*.13*over*u_overA;
+  // the one word left: Heart — a word of the poem itself; everything else fades, it stays, brightens, grows a little
+  vec2 W=vec2(0.,-.4);
+  vec2 pw=W+(p-W)/u_wscale;
+  vec2 tw=vec2(pw.x*.62+.5,fract(pw.y*.62*.5+.5+u_scroll));
+  float word=texture(u_word,tw).a;
+  c+=mix(vec3(.55,.2,.12)*.085*(.35+.65*u_overA),vec3(.7,.28,.16)*.5,u_keep)*word;
+  // a pen thrown at the page
+  if(u_ink>0.){
+    vec2 a=vec2(-.75,.05), b=vec2(.55,-.55);
+    float d=sdCap(p,a,mix(a,b,u_ink),.002,.012);
+    float drops=0.; for(int k=0;k<14;k++){ float fk=float(k); vec2 dp=mix(a,b,h12(vec2(fk,3.)))+vec2(h12(vec2(fk,5.))-.5,h12(vec2(fk,7.))-.5)*.12;
+      drops=max(drops,1.-smoothstep(.0,.004+.008*h12(vec2(fk,9.)),length(p-dp))*step(h12(vec2(fk,3.)),u_ink)); }
+    c=mix(c,vec3(.01),max(1.-smoothstep(-PX,PX,d),drops)*.9);
+  }
+  // the slash and the split
+  float cut=abs(dot(uv-vec2(0.,-.4),nn));
+  c=mix(c,vec3(0.),(1.-smoothstep(u_split*.03-PX,u_split*.03+PX,cut))*step(.001,u_split));
+  c+=vec3(.5,.42,.32)*.25*exp(-abs(cut-u_split*.03)*400.)*step(.001,u_split);
+  c+=vec3(1.,.95,.9)*exp(-cut*900.)*u_slash*step(abs(dot(uv-vec2(0.,-.4),sd)),.5);
+  vec2 pe=abs(uv)-vec2(.82,.48);
+  return c*(1.-smoothstep(-.02,.01,max(pe.x,pe.y)));
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y; PX=1./u_res.y;
+  reader();
+  vec3 col=vec3(.003)+paper(uv)*u_polyA;
+  col+=cursors(uv)*u_polyA;
+  // outer outline: heptagon, corners cut away, converging to a circle
+  if(u_polyA>0.){
+    float d=1e3;
+    for(int i=0;i<64;i++){ if(i>=u_n) break; vec2 a=u_poly[i], b=u_poly[(i+1)%u_n]; d=min(d,sdSeg(uv,a,b)); }
+    col+=vec3(.86,.8,.7)*(line(d,.0016)+.2*exp(-d*120.))*u_polyA;
+  }
+  for(int i=0;i<7;i++){ vec4 f=dissolving(i,uv); col=col*(1.-f.a)+f.rgb; }
+  if(u_cursor>0.){ float d=sdBox(uv,vec2(.012,.022)); col+=vec3(.9)*(1.-smoothstep(-PX,PX,d))*u_cursor; }
+  if(u_ringA>0.){
+    float r=length(uv), a=atan(uv.y,uv.x), g=abs(wrapA(a-u_gap));
+    vec2 e1=vec2(cos(u_gap+u_half),sin(u_gap+u_half))*u_R, e2=vec2(cos(u_gap-u_half),sin(u_gap-u_half))*u_R;
+    float dr=g>u_half?abs(r-u_R):min(length(uv-e1),length(uv-e2));
+    col=mix(col,vec3(.92,.91,.88),line(dr,.0085)*u_ringA);
+    col+=vec3(1.,.95,.9)*exp(-max(dr-.0085,0.)*70.)*.25*u_ringA;
+    col+=vec3(1.,.9,.8)*(exp(-length(uv-e1)*90.)+exp(-length(uv-e2)*90.))*u_snap*1.5;
+    if(u_heart>0.){
+      float x=uv.x/u_R; float y=.3*exp(-pow((x-.05)/.06,2.))-.12*exp(-pow((x+.05)/.05,2.))-.1*exp(-pow((x-.18)/.05,2.));
+      float hd=max(abs(uv.y/u_R-y)*u_R,(abs(x)-.62)*u_R);
+      col+=vec3(.5,1.,.7)*(line(hd,.0022)+exp(-hd*120.)*.4)*u_heart;
+    }
+  }
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.5, u_ca=.004)
+ERASE = [118.926, 119.158, 119.390, 119.617, 119.843, 120.307]
+FRAG_T, TRY, NEAR, SNAP, END = 120.860, 121.677, 124.464, 124.890, 125.708
+ORDER = [2, 5, 0, 4, 1, 6, 3]
+RP = .36
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def saccade(t, t0, a, b, dur=.07, over=.07):
+    if t < t0: return a
+    x = (t - t0) / dur
+    if x < 1: return a + (b - a) * (1 + over) * outc(x)
+    return b + (b - a) * over * (1 - ease((t - t0 - dur) / .14))
+
+
+def corner_angle(i): return math.radians(90 + i * 360 / 7)
+
+
+def polygon(t):
+    """heptagon; corner k is cut when its beat comes; after FRAGMENTS, Chaikin iterations then a true circle"""
+    V = [(RP * math.cos(corner_angle(i)), RP * math.sin(corner_angle(i))) for i in range(7)]
+    cut_t = {ORDER[k]: ERASE[k] for k in range(6)}; cut_t[ORDER[6]] = FRAG_T
+    pts = []
+    for i in range(7):
+        c = clamp((t - cut_t[i]) / .12) * .25
+        if c <= 0: pts.append(V[i]); continue
+        a, b, n = V[i - 1], V[i], V[(i + 1) % 7]
+        pts.append((b[0] + (a[0] - b[0]) * c, b[1] + (a[1] - b[1]) * c))
+        pts.append((b[0] + (n[0] - b[0]) * c, b[1] + (n[1] - b[1]) * c))
+    # v2: smooth — every stage is resampled to 64 points by arc length (starting at the top) and the stages are
+    # interpolated continuously: Chaikin 0 → 1 → 2 → 3, then onto the true circle. No truncation, no jumps.
+    def chaikin(P):
+        q = []
+        for i in range(len(P)):
+            a, b = P[i], P[(i + 1) % len(P)]
+            q.append((.75 * a[0] + .25 * b[0], .75 * a[1] + .25 * b[1])); q.append((.25 * a[0] + .75 * b[0], .25 * a[1] + .75 * b[1]))
+        return q
+    def resample(P, n=64):
+        k0 = min(range(len(P)), key=lambda k: abs(((math.atan2(P[k][1], P[k][0]) - math.pi / 2 + math.pi) % (2 * math.pi)) - math.pi))
+        P = P[k0:] + P[:k0]
+        seg = [math.hypot(P[(i + 1) % len(P)][0] - P[i][0], P[(i + 1) % len(P)][1] - P[i][1]) for i in range(len(P))]
+        L = sum(seg); out = []; i = 0; acc = 0.
+        for k in range(n):
+            target = L * k / n
+            while acc + seg[i] < target and i < len(P) - 1: acc += seg[i]; i += 1
+            f = (target - acc) / max(seg[i], 1e-9)
+            a, b = P[i], P[(i + 1) % len(P)]
+            out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+        return out
+    stages = [pts]
+    for _ in range(3): stages.append(chaikin(stages[-1]))
+    stages = [resample(P) for P in stages]
+    x = clamp((t - FRAG_T - .1) / .55) * 3                  # continuous iteration count
+    k = min(int(x), 2); f = ease(x - k) if x < 3 else 1.
+    out = [(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f) for a, b in zip(stages[k], stages[k + 1])] if x > 0 else stages[0]
+    rnd = ease((t - FRAG_T - .6) / .45)
+    if rnd > 0:
+        circ = [(RP * .93 * math.cos(math.pi / 2 + 2 * math.pi * j / 64), RP * .93 * math.sin(math.pi / 2 + 2 * math.pi * j / 64)) for j in range(64)]
+        # the resampled outline runs the same way round as the circle? if not, flip it
+        cw = sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(out, out[1:] + out[:1])) < 0
+        if cw: out = [out[0]] + out[:0:-1]
+        out = [(a[0] + (b[0] - a[0]) * rnd, a[1] + (b[1] - a[1]) * rnd) for a, b in zip(out, circ)]
+    pts = out
+    return pts
+
+
+def params(t):
+    g = 0.
+    for k, t0 in enumerate(ERASE):
+        g = saccade(t, t0 - .12, g, math.degrees(corner_angle(ORDER[k])) % 360 if k == 0 else g + ((math.degrees(corner_angle(ORDER[k])) - g + 180) % 360 - 180))
+    g = saccade(t, FRAG_T - .1, g, g + ((math.degrees(corner_angle(ORDER[6])) - g + 180) % 360 - 180))
+    g = saccade(t, TRY - .2, g, g + ((-90 - g + 180) % 360 - 180), .12)
+    erase = [0.] * 7
+    for k, t0 in enumerate(ERASE): erase[ORDER[k]] = clamp((t - t0) / .5)
+    erase[ORDER[6]] = clamp((t - FRAG_T) / .6)
+    base = math.radians(27.); half = base
+    if t > TRY:
+        x = clamp((t - TRY) / (NEAR - TRY))
+        half = base * (1 - .9 * (1 - (1 - x) ** 1.6)) + math.radians(1.2) * math.sin(t * 47.) * x
+    if t > SNAP:
+        y = t - SNAP; half = base + math.radians(9.) * math.exp(-y * 7.) * math.cos(y * 26.)
+    heart = math.exp(-((t - (NEAR - .05)) / .12) ** 2) + .5 * math.exp(-((t - (NEAR + .33)) / .1) ** 2) if NEAR - .35 < t < SNAP + .05 else 0.
+    pts = polygon(t)
+    poly = pts + [(0., 0.)] * (64 - len(pts))
+    fpos = [(RP * 1.15 * math.cos(corner_angle(i)), RP * 1.15 * math.sin(corner_angle(i))) for i in range(7)]
+    scroll = 0.
+    for k in range(200):                                   # integrate a slowing scroll
+        tt = 118.3 + (t - 118.3) * (k + .5) / 200
+        v = .09 * (1 - ease((tt - TRY) / (NEAR - TRY - .6)))
+        scroll += v * (t - 118.3) / 200 if t > 118.3 else 0
+    return dict(u_cursor=1 - ease((t - 118.33) / .25), u_ringA=ease((t - 118.36) / .3), u_R=.15 * (.3 + .7 * outc((t - 118.36) / .35)),
+                u_gap=math.radians(g), u_half=half, u_poly=poly, u_n=len(pts), u_polyA=ease((t - 118.5) / .4),
+                u_fpos=fpos, u_erase=erase, u_fragA=ease((t - 118.5) / .35),
+                u_scroll=scroll + SCROLL0, u_overA=ease((t - 118.6) / .8) * (1 - ease((t - 123.2) / 1.)), u_heartA=0.,
+                u_keep=ease((t - 123.4) / .7), u_wscale=1.,
+                u_cur=ease((t - 118.9) / .4) * (1 - ease((t - NEAR + .1) / .25)), u_sel=ease((t - 123.2) / .35),
+                u_lines=LINES, u_nl=NL, u_hx=HX,
+                u_ink=outc((t - NEAR) / .09), u_slash=math.exp(-max(t - SNAP, 0) * 8) * (t >= SNAP),
+                u_split=ease((t - SNAP - .03) / .3), u_heart=heart,
+                u_snap=math.exp(-max(t - SNAP, 0) * 6) * (t > SNAP) + .4 * clamp((t - TRY) / (NEAR - TRY)) * (t < SNAP))
+
+
+POEM = ['Heart, we will forget him,', 'You and I, tonight!', 'You may forget the warmth he gave,', 'I will forget the light.',
+        'When you have done pray tell me,', 'That I my thoughts may dim;', "Haste! lest while you're lagging", 'I may remember him!']
+_tex = {}
+_HEART = {}
+_LINES = []
+HEART_K = 16 + 8                                       # a 'Heart, …' line (k % 8 == 0) that is not struck out
+
+
+def _pages():
+    if _tex: return _tex
+    W, H = 1400, 2600
+    under = Image.new('RGBA', (W, H), (0, 0, 0, 0)); du = ImageDraw.Draw(under)
+    over = Image.new('RGBA', (W, H), (0, 0, 0, 0)); do = ImageDraw.Draw(over)
+    fh = ImageFont.truetype('C:/Windows/Fonts/Inkfree.ttf', 58)
+    fc = ImageFont.truetype('C:/Windows/Fonts/palai.ttf', 46)
+    y = 60; k = 0
+    word = Image.new('RGBA', (W, H), (0, 0, 0, 0)); dw = ImageDraw.Draw(word)
+    while y < H - 80:                                          # the poem, drafted again and again, some lines struck out
+        ln = POEM[k % len(POEM)]
+        if k == HEART_K:                                       # this "Heart" is the one that will be left on the page
+            hw = du.textlength('Heart', font=fh)
+            x0 = W / 2 - hw / 2
+            du.text((x0, y), ln, font=fh, fill=(255, 255, 255, 255))
+            dw.text((x0, y), 'Heart', font=fh, fill=(255, 255, 255, 255))
+            bb = du.textbbox((x0, y), 'Heart', font=fh)
+            _HEART['cy'] = (bb[1] + bb[3]) / 2
+            _HEART['x'] = (bb[0] / W, bb[2] / W)
+            _LINES.append(((bb[1] + bb[3]) / 2 / H, x0 / W, (x0 + du.textlength(ln, font=fh)) / W))
+            y += 86; k += 1; continue
+        du.text((120 + (k * 37) % 90, y), ln, font=fh, fill=(255, 255, 255, 255))
+        bb = du.textbbox((120 + (k * 37) % 90, y), ln, font=fh)
+        _LINES.append(((bb[1] + bb[3]) / 2 / H, bb[0] / W, bb[2] / W))
+        if k % 3 == 1:
+            wdt = du.textlength(ln, font=fh)
+            du.line((110 + (k * 37) % 90, y + 36, 130 + (k * 37) % 90 + wdt, y + 30), fill=(255, 255, 255, 255), width=5)
+        y += 86; k += 1
+    y = 30
+    n = 7
+    while y < H - 60:                                          # Archimedes' squeeze on pi, written over it
+        lo = n * math.sin(math.pi / n); hi = n * math.tan(math.pi / n)
+        do.text((260, y), f'n = {n:<6}  {lo:.7f}  <  π  <  {hi:.7f}', font=fc, fill=(255, 255, 255, 255))
+        y += 64; n *= 2
+        if n > 7 * 2 ** 16: n = 7
+    _tex.update(u_under=under, u_over=over, u_word=word)
+    return _tex
+
+
+def textures(t, w, h): return _pages()
+
+
+def _scroll_end():
+    t = END; sc = 0.
+    for k in range(200):
+        tt = 118.3 + (t - 118.3) * (k + .5) / 200
+        v = .09 * (1 - ease((tt - TRY) / (NEAR - TRY - .6)))
+        sc += v * (t - 118.3) / 200
+    return sc
+
+
+_pages()
+# tuv.y = fract(p.y*.31 + .5 + scroll) = 1 - cy/H  at p.y = -.4 once the pages have stopped
+SCROLL0 = ((1 - _HEART['cy'] / 2600) - (-.4 * .31 + .5) - _scroll_end()) % 1.0
+
+LINES = (_LINES + [(9., 0., 0.)] * 40)[:40]
+NL = min(len(_LINES), 40)
+HX = _HEART['x']

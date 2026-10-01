@@ -1,0 +1,152 @@
+"""s03 · 0:29.709–0:47.0  "If I'm a set of points …" — it lays itself open (LLM mechanics, no labels).
+The white dot is you throughout; the copper dot is me.
+points/DIMENSION: embedding lattice unfolds into 3D · circle/CIRCUMFERENCE: rotary positions, then unrolled ·
+sine/TANGENTS: you settle where the tangent is flat · infinity/LIMITATIONS: tokens stream to the window's edge ·
+AC to DC: a wavering distribution collapses; the row becomes the token field t01 opens on."""
+import math
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform float u_ph;       // phase 0 lattice, 1 ring, 2 unroll, 3 sine, 4 stream, 5 field
+uniform float u_appear, u_depth, u_axes, u_yaw, u_pitch;
+uniform float u_ring, u_rot, u_unroll;
+uniform float u_amp, u_youX, u_tang, u_focusT;
+uniform float u_scroll, u_stop, u_boundA, u_rows, u_ac, u_dc;
+out vec4 fragColor;
+#define PI 3.14159265
+float PX;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.); return length(pa-ba*h); }
+float disk(vec2 p, float r){ return 1.-smoothstep(r-PX,r+PX,length(p)); }
+vec3 proj(vec3 w){ // yaw / pitch camera at distance 3
+  float cy=cos(u_yaw), sy=sin(u_yaw), cp=cos(u_pitch), sp=sin(u_pitch);
+  w.xz=mat2(cy,sy,-sy,cy)*w.xz; w.yz=mat2(cp,sp,-sp,cp)*w.yz;
+  float z=3.-w.z; return vec3(w.xy*1.6/z,1.6/z);
+}
+const vec3 WHITE=vec3(.92,.91,.88), COPPER=vec3(1.,.62,.3);
+// the context-window token field (identical to the one t01 opens on)
+vec3 tokens(vec2 p, float rows){
+  float g=.034;
+  vec2 q=p+vec2(u_time*.22,0.);
+  vec2 id=floor(q/g), f=fract(q/g)-.5;
+  if(abs(id.y+.5)>rows) return vec3(0.);
+  float r=h12(id);
+  vec2 bx=abs(f)-vec2(.36,.26);
+  float d=(length(max(bx,0.))+min(max(bx.x,bx.y),0.)-.06)*g;
+  float edge=.42;
+  float inside=smoothstep(edge+.01,edge-.01,p.x);
+  float on=step(.55,r)*(.25+.75*step(.93,h12(id+floor(u_time*3.))))*mix(.05,.55,inside);
+  vec3 c=mix(WHITE*.8,COPPER*.85,step(.85,r))*on*(1.-smoothstep(-PX,PX,d))*.7;
+  return c;
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y; PX=1./u_res.y;
+  vec3 col=vec3(.004);
+  vec2 you=vec2(0.), me=vec2(0.);
+  if(u_ph<2.5){
+    // 5x5x5 lattice -> ring -> unrolled line
+    for(int i=0;i<125;i++){
+      float fi=float(i);
+      vec3 g=vec3(mod(fi,5.),mod(floor(fi/5.),5.),floor(fi/25.))-2.;
+      vec3 w=vec3(g.x,g.y,g.z*u_depth)*.28;
+      float ang=fi/125.*2.*PI+u_rot;
+      vec3 ringP=vec3(cos(ang),sin(ang),0.)*.55;
+      float cut=-PI*.5;                                     // cut at the bottom and unroll
+      float s=mod(ang-cut,2.*PI);
+      vec3 lineP=vec3(-PI*.55+s*.55,-.55,0.);
+      vec3 rp=mix(ringP,lineP,u_unroll);
+      w=mix(w,rp,u_ring);
+      float rad=length(g)/3.5;
+      float a=smoothstep(rad-.15,rad,u_appear*1.2);
+      vec3 pr=proj(w);
+      col+=WHITE*.75*a*disk(uv-pr.xy,.0045*pr.z);
+    }
+    // copper axes at DIMENSION
+    if(u_axes>0.){
+      for(int k=0;k<3;k++){
+        vec3 e=k==0?vec3(1,0,0):(k==1?vec3(0,1,0):vec3(0,0,1));
+        vec3 a0=proj(-e*.7), a1=proj(e*.7);
+        col+=COPPER*u_axes*(1.-smoothstep(0.,PX*1.5,sdSeg(uv,a0.xy,a1.xy)))*.8;
+      }
+    }
+    // you (white) and me (copper): centre of the lattice; on the ring they keep a fixed angle
+    vec3 yw=mix(vec3(0.),mix(vec3(cos(u_rot+PI*.5),sin(u_rot+PI*.5),0.)*.55,vec3(-PI*.55+mod(u_rot+PI,2.*PI)*.55,-.55,0.),u_unroll),u_ring);
+    vec3 mw=mix(vec3(0.),mix(vec3(cos(u_rot+PI*.5+1.05),sin(u_rot+PI*.5+1.05),0.)*.55,vec3(-PI*.55+mod(u_rot+PI+1.05,2.*PI)*.55,-.55,0.),u_unroll),u_ring);
+    vec3 py=proj(yw), pm=proj(mw);
+    col+=COPPER*1.2*disk(uv-pm.xy,.009*pm.z)*u_ring;
+    col+=vec3(1.)*1.5*disk(uv-py.xy,.011*py.z);
+    if(u_ring>.5&&u_unroll<.5){ col+=COPPER*.25*(1.-smoothstep(0.,PX*1.5,abs(length(uv)-.55*1.6/3.)))*(1.-u_unroll); }
+  } else if(u_ph<3.5){
+    // the unrolled line becomes a sine wave; tangents; you settle where the tangent is flat
+    float k=2.2, X=uv.x;
+    float y0=-.293;
+    float f=y0+u_amp*sin(k*X/.293*.55);
+    float kk=k/.293*.55;
+    float dcurve=abs(uv.y-f)/sqrt(1.+pow(u_amp*kk*cos(kk*X),2.));
+    col+=WHITE*.8*(1.-smoothstep(0.,PX*1.6,dcurve));
+    for(int i=-8;i<=8;i++){
+      float x=float(i)*.1;
+      float y=y0+u_amp*sin(kk*x); float sl=u_amp*kk*cos(kk*x);
+      vec2 dir=normalize(vec2(1.,sl))*.06;
+      float isYou=1.-smoothstep(.02,.06,abs(x-u_youX));
+      float dim=mix(1.,.2,u_focusT)*(1.-isYou)+isYou*(1.+u_focusT);
+      col+=COPPER*1.1*u_tang*dim*(1.-smoothstep(0.,PX*1.3,sdSeg(uv,vec2(x,y)-dir,vec2(x,y)+dir)));
+    }
+    vec2 yp=vec2(u_youX,y0+u_amp*sin(kk*u_youX)+.012);
+    col+=vec3(1.)*1.5*disk(uv-yp,.011);
+  } else {
+    // a stream of tokens runs to the edge of the window; you stand at the edge
+    float edge=.42;
+    vec3 tk=tokens(uv,u_rows);
+    float row=step(abs(uv.y+.0-.017),.02+u_rows*.034);
+    float gapZone=smoothstep(edge-.001,edge-.06,uv.x)*u_stop+ (1.-u_stop);
+    col+=tk*mix(1.,gapZone,step(uv.x,edge));
+    // ticks towards infinity
+    float tick=step(.5,fract((uv.x+u_scroll)*14.))*(1.-smoothstep(0.,PX*1.5,abs(uv.y+.06)))*(1.-u_rows*.08);
+    col+=WHITE*.25*tick*step(uv.x,edge)*(1.-u_dc);
+    col+=vec3(1.)*u_boundA*(1.-smoothstep(0.,PX*1.2,abs(uv.x-edge)))*1.4;
+    col+=vec3(1.)*1.5*disk(uv-vec2(edge,-.06),.011)*(1.-u_rows*.1);
+    // AC -> DC: a wavering distribution over the stream settles into one flat line
+    if(u_ac>0.){
+      float amp=.06*(1.-u_dc);
+      float w=.16+amp*sin(uv.x*30.+u_time*14.)*sin(u_time*3.);
+      col+=COPPER*.9*u_ac*(1.-smoothstep(0.,PX*1.6,abs(uv.y-w)))*step(uv.x,edge);
+    }
+  }
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+
+POST = dict(u_bloom=.5, u_ca=.005)
+T_PTS, T_DIM, T_CIR, T_CIRC, T_SIN, T_TAN, T_INF, T_LIM, T_AC, T_ACDC, T_END = \
+    29.709, 32.682, 33.412, 36.287, 37.067, 40.049, 40.706, 43.507, 44.452, 45.850, 47.0
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def params(t):
+    p = dict(u_appear=clamp((t - T_PTS) / 1.2), u_depth=outc((t - T_DIM) / .5), u_axes=math.exp(-max(t - T_DIM, 0) * 1.8) * (t > T_DIM),
+             u_yaw=.35 * ease((t - 31.1) / 1.5) + .12 * math.sin(t * .6), u_pitch=.25 * ease((t - 31.1) / 1.5),
+             u_ring=ease((t - T_CIR) / .7), u_rot=(t - T_CIR) * 1.1 if t > T_CIR else 0., u_unroll=ease((t - T_CIRC) / .6))
+    if t >= T_CIR:
+        p['u_yaw'] = p['u_yaw'] * (1 - ease((t - T_CIR) / .7)); p['u_pitch'] = p['u_pitch'] * (1 - ease((t - T_CIR) / .7))
+    if t >= T_CIRC: p['u_rot'] = (T_CIRC - T_CIR) * 1.1
+    ph = 0.
+    if t >= T_CIR: ph = 1.
+    if t >= T_SIN: ph = 3.
+    if t >= T_INF: ph = 4.
+    p['u_ph'] = ph
+    # sine: amplitude grows; you slide down to the trough where the tangent is flat
+    p['u_amp'] = .12 * ease((t - T_SIN) / 1.0)
+    kk = 2.2 / .293 * .55
+    trough = -math.pi / 2 / kk                                     # sin = -1
+    p['u_youX'] = .35 + (trough - .35) * ease((t - 38.2) / (T_TAN - 38.2))
+    p['u_tang'] = ease((t - 38.4) / .6); p['u_focusT'] = ease((t - T_TAN) / .3)
+    # stream to the edge
+    p['u_scroll'] = t * .6; p['u_stop'] = ease((t - T_LIM) / .25); p['u_boundA'] = ease((t - 41.8) / .4)
+    p['u_rows'] = 1. + 20. * ease((t - T_ACDC) / 1.0)
+    p['u_ac'] = ease((t - T_AC) / .4) * (1 - ease((t - 46.6) / .4)); p['u_dc'] = ease((t - T_ACDC) / .5)
+    return p

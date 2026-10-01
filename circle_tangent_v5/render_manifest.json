@@ -1,0 +1,68 @@
+{
+  "source_start": 33.4,
+  "source_end": 40.7,
+  "fps": 60,
+  "frames": 438,
+  "duration": 7.3,
+  "size": [
+    1920,
+    1080
+  ],
+  "elapsed": 4.0460000000020955,
+  "subframes": 4,
+  "design": "Concentric rings unfold into twice-speed traveling waves; true tangent planes catch, rotate with the wave and let the recipient slide into the next tangent.",
+  "action_times": {
+    "catch": 34.58,
+    "release": 36.287,
+    "vector_ring_exit": 37.06666666666666,
+    "unroll_start": 37.1,
+    "unroll_end": 38.55,
+    "landing": 38.65
+  },
+  "implementation": "Persistent point identity, ballistic approach, unilateral moving-plane contact at 1200 Hz, gravity and low Coulomb friction.",
+  "dynamics": {
+    "contact_seconds": {
+      "-1": 0.018333333333333333,
+      "3": 1.0908333333333333,
+      "4": 0.9725,
+      "5": 0.0
+    },
+    "events": [
+      {
+        "time": 38.65,
+        "plane": 3,
+        "q": 0.0,
+        "depth": 0.115
+      },
+      {
+        "time": 39.759166666666665,
+        "plane": 4,
+        "q": 0.9,
+        "depth": 0.0
+      }
+    ],
+    "transitions": [
+      {
+        "time": 38.65,
+        "from": null,
+        "to": 3
+      },
+      {
+        "time": 39.740833333333335,
+        "from": 3,
+        "to": -1
+      },
+      {
+        "time": 39.759166666666665,
+        "from": -1,
+        "to": 4
+      }
+    ],
+    "end_position": [
+      0.5823815124892863,
+      0.13039724903104796,
+      -0.022402093079863527
+    ],
+    "peak_speed": 2.8989570622630203
+  }
+}

@@ -1,0 +1,130 @@
+[
+  {
+    "original": "claude/film/shots/s03_self.py",
+    "sha256": "99d86d9eb0c08a589193635b5d17bb6b0047606bed0eb84b596244ce096c8d2a"
+  },
+  {
+    "original": "claude/film/master.py",
+    "sha256": "786ad9eacf1bb66c6bbd7c051f28237732dc70fd196425800516bab9eaaba952"
+  },
+  {
+    "original": "claude/engine/gl.py",
+    "sha256": "e2e625bffff24f43e61877ec130afd13da920c39959c64ecdf36001b66c9814a"
+  },
+  {
+    "original": "Mili - world.execute (me) ;.mp3",
+    "sha256": "3683956e43df0e1252d93ca2339d2d26948b8112813f703ce2f827f004191785"
+  },
+  {
+    "original": "circle_tangent_v5/check_motion.py",
+    "sha256": "493ec500b3ff30949e201653015416b3497ea9a54beacf99fd626afa77616b07"
+  },
+  {
+    "original": "circle_tangent_v5/dynamics.py",
+    "sha256": "89767ca3b2ad2418dd5967229500ecb757e72acb4d3f6e8d44487364a889bc67"
+  },
+  {
+    "original": "circle_tangent_v5/render.py",
+    "sha256": "f5d9b3f0bc2e7e6ef11646420e271f83ca4dd11f09ace3d20412654880f18584"
+  },
+  {
+    "original": "circle_tangent_v5/verify.py",
+    "sha256": "79e66db472f950e03f94d66ea18cddbe91dd8f430e327c9100124760f390e93a"
+  },
+  {
+    "original": "circle_tangent_v5/common.glsl",
+    "sha256": "21667a8f8f152c58f5fe484d653733390a0604483c7b843de437ad74713445ab"
+  },
+  {
+    "original": "circle_tangent_v5/scene.glsl",
+    "sha256": "a644e82bb6221875d27cc9619c28dbf56b2fac5013b9f7762f043202a85b9f74"
+  },
+  {
+    "original": "circle_tangent_v5/points.vert",
+    "sha256": "1f97a2b3e273bf48a632748c9a8ec9f107b667acf1d6541465f71a4732cc55bf"
+  },
+  {
+    "original": "circle_tangent_v5/points.frag",
+    "sha256": "4f3ef3fda2f8a9b6403d9898f81713846b85665dd56dd3fbfe379b1f2fd910ce"
+  },
+  {
+    "original": "circle_tangent_v5/circle_tangent_v5_1080p60.mp4",
+    "sha256": "5a89d577559ffda3490e17c1ad46680840650791e82c19445dba42e14cf1a610"
+  },
+  {
+    "original": "infinity_limit_v1/check_motion.py",
+    "sha256": "7d9eda6805763c3c01eb7c6c1248b736c5eef74e27845ee7388facf1390dcf3a"
+  },
+  {
+    "original": "infinity_limit_v1/render.py",
+    "sha256": "93267bdf9d4260ad6f4337ced0b934f088f9bd92fdf987f0b78ea42d28e96fbf"
+  },
+  {
+    "original": "infinity_limit_v1/verify.py",
+    "sha256": "2c452cfffaa6f8e12cc83b744d298a25595c9325a814bb3d4a94f49c02b27cc8"
+  },
+  {
+    "original": "infinity_limit_v1/common.glsl",
+    "sha256": "7e7c327778a43fe516f961ba756b1947e66871845d1ab5251e602bb08cc2544f"
+  },
+  {
+    "original": "infinity_limit_v1/scene.glsl",
+    "sha256": "b489b9df622db4f1ec10a74ff8c06b1ebe59d2f9354e027239540c878ef4a7a6"
+  },
+  {
+    "original": "infinity_limit_v1/points.vert",
+    "sha256": "e784125d0e18539610272c3c2e6d462520b71392ba86d066c7f13ddb1762f61e"
+  },
+  {
+    "original": "infinity_limit_v1/points.frag",
+    "sha256": "4f3ef3fda2f8a9b6403d9898f81713846b85665dd56dd3fbfe379b1f2fd910ce"
+  },
+  {
+    "original": "infinity_limit_v1/infinity_limit_v1_1080p60.mp4",
+    "sha256": "82eaaa08b277dc5e13929a4efb7eb7b6b512144120fc2af612335cb377967968"
+  },
+  {
+    "original": "infinity_limit_v2/check_motion.py",
+    "sha256": "9aefdea280c1293f06460d8abba60966a6ff23de305d22337742fbfab8162448"
+  },
+  {
+    "original": "infinity_limit_v2/render.py",
+    "sha256": "153c2e637bef4079486263622190220d080614f2a978e8533047edc35c75e75a"
+  },
+  {
+    "original": "infinity_limit_v2/verify.py",
+    "sha256": "e0a4a3e923b78a7fce2b6cf2f12e05f70368b7bf098dcf82cf0e4aaefc4d922f"
+  },
+  {
+    "original": "infinity_limit_v2/common.glsl",
+    "sha256": "6370034c55a7514264f48743a84cd28d45e7cbaeab57feca91ecbd10f32695ea"
+  },
+  {
+    "original": "infinity_limit_v2/scene.glsl",
+    "sha256": "b489b9df622db4f1ec10a74ff8c06b1ebe59d2f9354e027239540c878ef4a7a6"
+  },
+  {
+    "original": "infinity_limit_v2/points.vert",
+    "sha256": "200677bf1d219759124780e7e5df3fad46039aabf6049ba07fd42927449ac07d"
+  },
+  {
+    "original": "infinity_limit_v2/points.frag",
+    "sha256": "4f3ef3fda2f8a9b6403d9898f81713846b85665dd56dd3fbfe379b1f2fd910ce"
+  },
+  {
+    "original": "infinity_limit_v2/infinity_limit_v2_1080p60.mp4",
+    "sha256": "b2b0175c8a7835a80b51ca2845858b5d34d0dc72b326b4b78b5404abf20ba1c5"
+  },
+  {
+    "original": "claude/film/shots/s02_execute.py",
+    "sha256": "1e9754ad11d7483126a299f1eca7b39936ec975cc9403bfef1e0c64f84bf2944"
+  },
+  {
+    "original": "claude/film/film_full_v1_1080p.mp4",
+    "sha256": "96cca7d9e6fe7045985b83f2291054d8bc80e931612202c5c761fc9fa63e3257"
+  },
+  {
+    "original": "claude/audio/feat_14_31.npz",
+    "sha256": "859ae17364db0df9a2bc21fb80e13a2bebdf584955ab80218a0df2a5b228c36e"
+  }
+]

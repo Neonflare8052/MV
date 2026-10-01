@@ -1,0 +1,754 @@
+"""s01 · 0:00–0:16  boot. Abstract: light, lines, points, type — no objects.
+Switch on the power line: the terminal flashes on — not a thing in the space: the glass we look through, the whole
+frame (the ending's glass, the same one). Behind it nothing, then: you create a sandbox (PROTECTION) and its walls draw
+behind the words; you load the model and, under the words, the memory map's zeros are overwritten by the weights while
+the glass clears · $ begin: through the glass — the words swell and fly past, the data after them — into the sandbox:
+the lattice spreads, OBJECT CREATION raises six layers · data parameters: flying inside the lattice · INITIALIZATION: the layers are pressed into memory one by
+one · the activation tree climbs · candidate words; SIMULATION. Spatial callouts ride with the camera."""
+import math
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+
+T_PWR, T_REM, T_PROT, T_LAY, T_BEGIN, T_OBJ = .100, 1.740, 2.920, 3.873, 5.491, 6.380
+T_FILL, T_INIT, T_SET, T_LETS, T_SIM = 7.446, 10.091, 11.095, 12.906, 13.891
+GLYPHS = Path(__file__).resolve().parents[2] / 'tests' / 't06_teletype' / 'glyphs.png'
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec3 u_cam, u_look; uniform float u_fov, u_focus, u_aper, u_roll, u_bright;
+uniform float u_power;                  // current spreading through the floor network from the centre
+uniform float u_gOn, u_gDim, u_gz0, u_gz1, u_gzD, u_glod, u_fly; uniform vec2 u_gc;  // the glass (see glass())
+uniform float u_box, u_boxB;            // sandbox drawn 0..1; its brightness
+uniform float u_press[6], u_mem[6], u_memA; // layer pressed into memory 0..1; band written (1 + flash); memory visible
+uniform float u_latR;                   // lattice layer 0 revealed radius
+uniform float u_rise;                   // upper layers 0..1
+uniform float u_param;                  // values being written (labels) 0..1
+uniform float u_fillR;                  // writing wave radius
+uniform float u_act;                    // activation (layer units)
+uniform float u_cand, u_pick, u_dimL;           // candidate words; one chosen
+uniform vec3 u_sa[64], u_sb[64]; uniform float u_sk[64]; uniform int u_ns;   // activation tree segments
+uniform sampler2D u_glyphs, u_words, u_glass, u_ui, u_tail;
+out vec4 fragColor;
+#define PI 3.14159265
+const float C=.1, RL=2.4, LH=.28, NG=42.;
+const float BY0=-.2, BH=.075;          // memory bands (layer 5 on top)
+const float BX=2.7, BYL=-.72, BYH=2.1; // sandbox
+const vec3 WHITE=vec3(.92,.91,.88), COP=vec3(1.,.58,.28), PHOS=vec3(1.,.95,.87);
+vec3 RT, UP; float PXW;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float h13(vec3 p){ return h12(p.xy+p.z*17.13); }
+float blurAt(float t){ return u_aper*abs(t-u_focus)/max(u_focus,.05); }
+// a glowing point of radius r seen at depth t, ray distance d
+float spot(float d, float t, float r){
+  float R=r+blurAt(t)+PXW*t*.8;
+  return (r*r)/(R*R)*exp(-d*d/(R*R)*2.)*exp(-t*.16);
+}
+// an antialiased, defocused line of half-width w at distance d on a plane seen at depth t with footprint fp
+float lineM(float d, float w, float t, float fp){
+  float b=blurAt(t)+fp;
+  return w/(w+b)*(1.-smoothstep(0.,w+b,d));
+}
+float glyph(float g, vec2 f, float lod){
+  if(g<.5||f.x<0.||f.x>1.||f.y<0.||f.y>1.) return 0.;
+  return textureLod(u_glyphs,vec2((g+clamp(f.x,.02,.98))/NG,clamp(f.y,.02,.98)),lod).r;
+}
+float bandY(float k){ return BY0-BH*(5.-k); }
+float layerY(float k){ return mix(k*LH*u_rise,bandY(k),u_press[int(k+.5)]); }
+
+// ---- the network printed on a layer plane --------------------------------------------------------
+vec3 plane(vec3 ro, vec3 rd, float k, float tmax){
+  float y=layerY(k);
+  if(k>.5&&u_rise<=0.) return vec3(0.);
+  float t=(y-ro.y)/rd.y;
+  if(t<=0.||t>tmax) return vec3(0.);
+  vec3 p=ro+rd*t;
+  float fp=PXW*t/max(abs(rd.y),.03)*.6;
+  float graze=smoothstep(.015,.12,abs(rd.y))*exp(-t*.12);
+  vec2 g=p.xz/C-.5;
+  float r=length(p.xz);
+  float inside=k<.5?1.:step(max(abs(p.x),abs(p.z)),RL);
+  if(inside<=0.) return vec3(0.);
+  // segments between neighbouring nodes
+  vec2 id=floor(g);
+  float jz=floor(g.y+.5), jx=floor(g.x+.5);
+  float dz=abs(g.y-jz)*C, dx=abs(g.x-jx)*C;
+  float sx=h13(vec3(id.x,jz,k*7.+1.)), sz=h13(vec3(jx,id.y,k*7.+2.));
+  float base=k<.5?.35:.0;
+  float mx=lineM(dz,.0009,t,fp)*(base+step(.52,sx)), mz=lineM(dx,.0009,t,fp)*(base+step(.55,sz));
+  vec3 col=vec3(0.);
+  vec3 dim=vec3(.05,.05,.055)*(k<.5?1.:u_rise);
+  col+=dim*(mx+mz);
+  // current (layer 0): manhattan front from the source, branches light up in turn
+  if(k<.5){
+    float md=abs(p.x)+abs(p.z)+.35*h12(floor(g));
+    float lit=smoothstep(u_power,u_power-.4,md), head=exp(-pow((md-u_power)*5.,2.));
+    float fade=exp(-max(r-2.,0.)*.35);
+    col+=COP*((mx*step(.52,sx)+mz*step(.55,sz))*(lit*.8+head*3.))*fade;
+    // nodes (vias)
+    vec2 nq=(fract(g+.5)-.5)*C;
+    col+=COP*lineM(abs(length(nq)-.004),.0008,t,fp)*lit*.6*step(.8,h12(floor(g+.5)+3.))*fade;
+  }
+  // activation along the connections
+  col+=COP*(mx+mz)*exp(-pow((k-u_act)*1.3,2.))*.5*step(.6,h12(floor(g)+k));
+  return col*graze*u_dimL;
+}
+
+// ---- the lattice of points (2D DDA over columns, six layers per column) --------------------------
+vec3 lattice(vec3 ro, vec3 rd, float tmax){
+  if(u_latR<0.) return vec3(0.);
+  float ytop=5.*LH*max(u_rise,.0)+.05;
+  vec3 bmin=vec3(-RL,BYL,-RL), bmax=vec3(RL,ytop,RL);
+  vec3 ird=1./rd;
+  vec3 ta=(bmin-ro)*ird, tb=(bmax-ro)*ird, tn=min(ta,tb), tf=max(ta,tb);
+  float t0=max(max(tn.x,tn.y),max(tn.z,0.)), t1=min(min(tf.x,tf.y),min(tf.z,tmax));
+  if(t0>=t1) return vec3(0.);
+  vec2 rdx=rd.xz; rdx=vec2(abs(rdx.x)<1e-5?1e-5:rdx.x,abs(rdx.y)<1e-5?1e-5:rdx.y);
+  vec3 p=ro+rd*(t0+1e-4);
+  vec2 cell=floor(p.xz/C), st=sign(rdx), dl=abs(C/rdx);
+  vec2 nx=((cell+max(st,0.))*C-ro.xz)/rdx;
+  float tc=t0;
+  vec3 acc=vec3(0.);
+  int NL=u_rise>0.?6:1;
+  for(int i=0;i<140;i++){
+    if(tc>t1) break;
+    float hp=h12(cell);
+    vec2 cx=(cell+.5)*C;
+    float rr=length(cx);
+    if(hp>.3&&rr<u_latR+.3*h12(cell+5.)){
+      for(int k=0;k<6;k++){
+        if(k>=NL) break;
+        float fk=float(k);
+        vec3 pos=vec3(cx.x,layerY(fk),cx.y);
+        float tt=dot(pos-ro,rd);
+        if(tt<=0.||tt>tmax) continue;
+        vec3 v=ro+rd*tt-pos; float d=length(v);
+        float hk=h13(vec3(cell,fk));
+        float e=.35+.65*hk*hk;
+        vec3 c=WHITE;
+        if(hk>.9) c=COP;
+        // appear on reveal / rise
+        float a=k==0?smoothstep(0.,.3,u_latR-rr):smoothstep(fk-1.,fk,u_rise*5.);
+        // values being written: flicker; the sheet settles them
+        float w=clamp((u_fillR-rr-.3*hk)/.3,0.,1.);
+        float writing=w*(1.-w)*4.;
+        float settled=step(.5,u_mem[k]);
+        float fl=h13(vec3(cell,fk+floor(u_time*14.)*.13));
+        e*=mix(1.,.4+1.2*fl,writing*(1.-settled));
+        e+=writing*1.2*(1.-settled);
+        e+=6.*u_press[k]*(1.-u_press[k]);
+        float ac=exp(-pow((fk-u_act)*1.3,2.))*step(.9,h13(vec3(cell,fk+9.)))*.6;
+        c=mix(c,COP,ac); e+=ac*2.5;
+        acc+=c*e*a*spot(d,tt,.0055);
+        // value labels beside the points
+        if(u_param>0.&&hk<.45&&d<.06){
+          vec2 q=vec2(dot(v,RT),dot(v,UP))-vec2(.012,-.007);
+          float gw=.0072, gh=.012;
+          if(q.x>0.&&q.x<gw*4.&&q.y>0.&&q.y<gh){
+            float ci=floor(q.x/gw);
+            float val=h13(vec3(cell,fk+(settled>0.?0.:floor(u_time*(8.+20.*writing))*.11)+ci*3.7));
+            float gch=ci==1.?1.:27.+floor(val*10.);
+            if(ci==0.) gch=27.;
+            float lod=max(log2((PXW*tt+blurAt(tt))/(gw/48.)),0.);
+            float m=glyph(gch,vec2(fract(q.x/gw),q.y/gh),lod);
+            acc+=mix(vec3(.75,.72,.66),vec3(1.,.8,.55),writing)*m*a*u_param*(.35+writing*.8)*(1.-.5*settled);
+          }
+        }
+      }
+    }
+    if(nx.x<nx.y){ tc=nx.x; nx.x+=dl.x; cell.x+=st.x; } else { tc=nx.y; nx.y+=dl.y; cell.y+=st.y; }
+  }
+  return acc*u_dimL;
+}
+
+// ---- candidate words on cards hanging in depth ---------------------------------------------------------
+vec3 cards(vec3 ro, vec3 rd, float tmax){
+  if(u_cand<=0.) return vec3(0.);
+  vec3 acc=vec3(0.);
+  for(int k=0;k<5;k++){
+    float fk=float(k);
+    vec3 c=vec3(-.15+(k==1?.6:(k==2?-.5:(k==3?1.1:(k==4?-.9:0.)))), 2.45+(k==1?.34:(k==2?-.3:(k==3?.62:(k==4?-.55:0.)))), .2-.8*fk);
+    float t=(c.z-ro.z)/rd.z;
+    if(t<=0.||t>tmax) continue;
+    vec3 p=ro+rd*t;
+    vec2 uv=vec2((p.x-c.x)/2.4+.5,(p.y-c.y)/.2+.5);
+    if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.) continue;
+    float lod=max(log2((PXW*t+blurAt(t))/(2.4/1536.)),0.);
+    vec4 tx=textureLod(u_words,vec2(uv.x,(4.-fk+uv.y)/5.),lod);
+    float appear=clamp(u_cand*1.6-fk*.15,0.,1.);
+    float keep=k==0?1.+u_pick*.3:1.-u_pick;
+    acc+=tx.rgb*tx.a*appear*keep*1.3;
+  }
+  return acc;
+}
+
+// ---- the rest of the vocabulary: sheets of small words behind the cards, fainter the further (the long tail) -----
+const float TZ[4]=float[4](-2.2,-4.6,-8.,-13.);
+vec3 tail(vec3 ro, vec3 rd, float tmax){
+  if(u_cand<=0.) return vec3(0.);
+  vec3 acc=vec3(0.);
+  vec2 c0=vec2(-.15,2.45);
+  float since=u_time-13.891;
+  for(int k=0;k<4;k++){
+    float z=TZ[k];
+    float t=(z-ro.z)/rd.z;
+    if(t<=0.||t>tmax) continue;
+    vec3 p=ro+rd*t;
+    float W=1.7*(2.6-z), H=W*.56;                                          // each sheet about fills the frame from here
+    vec2 uv=vec2((p.x-c0.x)/W+.5,(p.y-c0.y)/H+.5);
+    if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.) continue;
+    float lod=max(log2((PXW*t+blurAt(t)*1.6)/(W/2048.)),0.);
+    float m=textureLod(u_tail,vec2(uv.x,(3.-float(k)+uv.y)/4.),lod).r;
+    float edge=smoothstep(0.,.08,uv.x)*smoothstep(1.,.92,uv.x)*smoothstep(0.,.1,uv.y)*smoothstep(1.,.9,uv.y);
+    float appear=clamp(u_cand*1.8-float(k)*.25,0.,1.);
+    float r=length(p.xy-c0);
+    float wave=since>0.?exp(-pow((r-since*5.5)/.45,2.))*exp(-since*.8):0.;
+    float a=appear*edge*(1.-.55*u_pick)*(1.+4.*wave)*exp(-float(k)*.35);
+    acc+=mix(vec3(.78,.76,.72),COP,.25*wave+.1*float(k==0))*m*a*.3;
+  }
+  return acc;
+}
+
+// ---- the activation tree: thin lines between the layers, growing upward with the activation --------------
+vec3 tree(vec3 ro, vec3 rd, float tmax){
+  if(u_act<-.5) return vec3(0.);
+  vec3 acc=vec3(0.);
+  for(int i=0;i<64;i++){
+    if(i>=u_ns) break;
+    float k=u_sk[i];
+    float f=clamp(u_act-k,0.,1.);
+    if(f<=0.) continue;
+    vec3 a=u_sa[i], b=u_sb[i];
+    a.y*=u_rise; if(k<4.5) b.y*=u_rise;
+    vec3 ba=b-a, w=ro-a;
+    float bb=dot(ba,ba), rb=dot(rd,ba), rw=dot(rd,w), bw=dot(ba,w);
+    float s=clamp((bw-rw*rb)/max(bb-rb*rb,1e-7),0.,f);
+    float t=s*rb-rw;
+    if(t<=0.||t>tmax) continue;
+    float d=length(ro+rd*t-a-ba*s);
+    float r=.0016, R=r+blurAt(t)+PXW*t*.7;
+    float g=(r/R)*exp(-d*d/(R*R)*2.)*exp(-t*.1);
+    float head=exp(-pow((s-f)*8.,2.))*step(f,.999);
+    acc+=COP*g*(2.+6.*head);
+    vec3 na=a-ro, nb=b-ro;
+    float ta=dot(na,rd), tb=dot(nb,rd);
+    if(ta>0.) acc+=vec3(1.,.8,.55)*spot(length(na-rd*ta),ta,.009)*2.5;
+    if(tb>0.&&f>=.999) acc+=vec3(1.,.8,.55)*spot(length(nb-rd*tb),tb,.009)*2.5;
+  }
+  return acc;
+}
+
+// ---- a glowing line segment (drawn from a toward b up to fraction f) --------------------------------------------
+float segGlow(vec3 ro, vec3 rd, vec3 a, vec3 b, float f, float r){
+  if(f<=0.) return 0.;
+  vec3 ba=b-a, w=ro-a;
+  float bb=dot(ba,ba), rb=dot(rd,ba), rw=dot(rd,w), bw=dot(ba,w);
+  float s=clamp((bw-rw*rb)/max(bb-rb*rb,1e-7),0.,f);
+  float t=s*rb-rw;
+  if(t<=0.) return 0.;
+  float d=length(ro+rd*t-a-ba*s);
+  float R=r+blurAt(t)+PXW*t*.7;
+  return (r/R)*exp(-d*d/(R*R)*2.)*exp(-t*.06);
+}
+// ---- the sandbox: a wire box round everything ---------------------------------------------------------------------
+vec3 sandbox(vec3 ro, vec3 rd){
+  if(u_box<=0.) return vec3(0.);
+  float g=0.;
+  for(int i=0;i<4;i++){
+    float a=float(i)*PI*.5+PI*.25;
+    vec2 c0=vec2(cos(a),sin(a))*BX*1.41421, c1=vec2(cos(a+PI*.5),sin(a+PI*.5))*BX*1.41421;
+    g+=segGlow(ro,rd,vec3(c0.x,BYL,c0.y),vec3(c0.x,BYH,c0.y),u_box,.0014);
+    g+=segGlow(ro,rd,vec3(c0.x,BYH,c0.y),vec3(c1.x,BYH,c1.y),u_box,.0014);
+    g+=segGlow(ro,rd,vec3(c0.x,BYL,c0.y),vec3(c1.x,BYL,c1.y),u_box,.0014);
+  }
+  return vec3(.8,.82,.86)*g*.9*u_boxB;
+}
+// ---- memory: six bands under the floor, written as the layers are pressed in --------------------------------------
+vec3 memory(vec3 ro, vec3 rd, float tmax){
+  if(u_memA<=0.) return vec3(0.);
+  vec3 acc=vec3(0.);
+  for(int k=0;k<6;k++){
+    float y=bandY(float(k));
+    float t=(y-ro.y)/rd.y;
+    if(t<=0.||t>tmax) continue;
+    vec3 p=ro+rd*t;
+    if(max(abs(p.x),abs(p.z))>RL) continue;
+    float fp=PXW*t/max(abs(rd.y),.02)*.6;
+    vec2 g=p.xz/.05;
+    vec2 f=abs(fract(g)-.5)*.05;
+    float edge=lineM(min(f.x,f.y),.0005,t,fp);
+    float bit=step(.45,h13(vec3(floor(g),float(k)*3.)));
+    float fill=bit*(1.-smoothstep(.013,.016+fp,max(f.x,f.y)));
+    float w=u_mem[k];
+    float graze=.0025/max(abs(rd.y),.05);
+    acc+=vec3(.35,.36,.4)*edge*.2+mix(WHITE,COP,.5)*(fill*.045+graze*.6)*min(w,1.)*exp(-t*.15)+vec3(1.,.9,.8)*(fill*.12+graze*1.5)*max(w-1.,0.);
+  }
+  float g=0.;
+  vec3 lo=vec3(-RL,bandY(0.)-.04,-RL), hi=vec3(RL,bandY(5.)+.04,RL);
+  g+=segGlow(ro,rd,vec3(lo.x,lo.y,hi.z),vec3(hi.x,lo.y,hi.z),1.,.001)+segGlow(ro,rd,vec3(lo.x,hi.y,hi.z),vec3(hi.x,hi.y,hi.z),1.,.001);
+  g+=segGlow(ro,rd,vec3(lo.x,lo.y,hi.z),vec3(lo.x,hi.y,hi.z),1.,.001)+segGlow(ro,rd,vec3(hi.x,lo.y,hi.z),vec3(hi.x,hi.y,hi.z),1.,.001);
+  g+=segGlow(ro,rd,vec3(hi.x,lo.y,lo.z),vec3(hi.x,lo.y,hi.z),1.,.001)+segGlow(ro,rd,vec3(hi.x,hi.y,lo.z),vec3(hi.x,hi.y,hi.z),1.,.001);
+  acc+=vec3(.6,.62,.66)*g*.7;
+  return acc*u_memA;
+}
+// ---- the terminal: the glass in front of it all (the ending's): its words (R), the data under them (G) -------------
+vec3 glass(vec3 col){
+  vec2 F=gl_FragCoord.xy;
+  vec2 c=F/u_res-.5;
+  vec2 cc=c*(1.+.07*(c.x*c.x*2.6+c.y*c.y));                                  // a CRT's bulge
+  vec2 g0=u_gc-.5;
+  vec2 cb=g0+(cc-g0)/u_gz1;                                                   // flying through: the frame swells past too
+  vec2 q=abs(cb)-vec2(.5-.03);
+  float edge=length(max(q,0.))+min(max(q.x,q.y),0.)-.03;
+  float inside=1.-smoothstep(-.006,.002,edge);
+  float gone=u_fly;
+  col*=mix(1.,mix(.22,1.,inside),1.-gone);                                    // the bezel, dark, at the corners
+  float on=u_gOn;
+  float grow=clamp(on/.06,0.,1.), open=smoothstep(.06,.26,on);
+  float hh=mix(.0025,.5,open), hw=grow*.5;
+  float flash=(1.-open)*5.+2.2*exp(-max(on-.26,0.)*9.)*step(.26,on);
+  float band=(1.-smoothstep(hw-.003,hw,abs(cc.x)))*(1.-smoothstep(hh-.004,hh,abs(cc.y)))*inside;
+  float live=open*(1.-gone);
+  vec2 su=cc+.5;
+  // the words, and the data a little deeper (it swells slower): smeared along the swell within the sub-frame
+  float r=0., gg=0.;
+  for(int i=0;i<6;i++){
+    float z=mix(u_gz0,u_gz1,(float(i)+.5)/6.);
+    float zd=1.+(z-1.)*u_gzD;
+    r+=textureLod(u_glass,u_gc+(su-u_gc)/z,max(log2(1.3333/z),0.)+u_glod).r;
+    gg+=textureLod(u_glass,u_gc+(su-u_gc)/zd,max(log2(1.3333/zd),0.)+u_glod*.6).g;
+  }
+  r/=6.; gg/=6.;
+  float wl=dot(col,vec3(.3,.5,.2));
+  float clear=1.-.72*smoothstep(.012,.1,wl);                                   // where the world lights up, the data burns off
+  float scan=mix(.76+.24*sin(F.y/(u_res.y/540.)*PI),1.,gone);
+  col*=1.-u_gDim*live*band;                                                  // its dark ground: opaque, clearing as it's built
+  col*=mix(1.,.9+.1*scan,band*live);
+  vec3 em=PHOS*(r*1.3+gg*.27*clear+.009)*scan*live+PHOS*flash*.2*(1.-gone);
+  return col+em*band;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  uv=mat2(cos(u_roll),-sin(u_roll),sin(u_roll),cos(u_roll))*uv;
+  vec3 ro=u_cam;
+  vec3 fw=normalize(u_look-ro); RT=normalize(cross(fw,vec3(0,1,0))); UP=cross(RT,fw);
+  float tf=tan(u_fov*.5);
+  vec3 rd=normalize(fw+(uv.x*RT+uv.y*UP)*2.*tf);
+  PXW=2.*tf/u_res.y;
+  float tmax=40.;
+  vec3 col=vec3(.004,.004,.005);
+  col+=plane(ro,rd,0.,tmax);
+  for(int k=1;k<6;k++) col+=plane(ro,rd,float(k),tmax);
+  col+=lattice(ro,rd,tmax);
+  col+=memory(ro,rd,tmax);
+  col+=sandbox(ro,rd);
+  col+=tail(ro,rd,tmax);
+  col+=cards(ro,rd,tmax);
+  col+=tree(ro,rd,tmax);
+  if(u_gOn>=0.&&u_fly<1.) col=glass(col);
+  col*=u_bright;
+  vec4 ui=texture(u_ui,gl_FragCoord.xy/u_res);
+  col=col*(1.-ui.a*.4)+ui.rgb*ui.a;
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+
+POST = dict(u_bloom=.6, u_ca=.007, u_grain=.04)
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def inc(x): x = clamp(x); return x ** 3
+def mix(a, b, x):
+    if isinstance(a, tuple): return tuple(p + (q - p) * x for p, q in zip(a, b))
+    return a + (b - a) * x
+
+
+# cuts: each is a list of keys (time, cam, look, fov, focus, aperture, roll°), eased between keys; hard cuts between lists
+CUTS = [
+    [(0.00, (-3.0, 3.1, 11.5), (-1.7, .45, 0.), 40, 11.6, .004, 0)],      # through the glass: see fly() (overrides)
+    [(7.446, (-1.6, .7, .33), (0., .66, .28), 56, .4, .012, 0),             # inside the lattice; focus racks out at the end
+     (9.0, (-.55, .7, .36), (.9, .64, .3), 56, .4, .012, 6),
+     (10.091, (.1, .74, .15), (1.2, .6, -.9), 56, 1.7, .012, 12)],
+    [(10.091, (0., .55, 6.6), (0., .5, 0.), 23, 6.6, .018, 0),              # INITIALIZATION side-on: pressed into memory
+     (11.2, (.4, .6, 6.5), (0., .52, 0.), 23, 6.5, .018, 0),
+     (12.906, (3.0, 1.7, 4.6), (0., 1.0, 0.), 30, 5.5, .014, 0)],           # ... then round to see the tree climb
+    [(12.906, (1.3, 2.62, 1.7), (-.6, 2.55, -1.6), 44, 1.9, .012, 6),      # candidates in depth, swinging round to SIMULATION
+     (13.8, (.1, 2.47, 2.65), (-.15, 2.45, 0.), 38, 2.45, .012, 0),
+     (16.0, (-.15, 2.45, 2.4), (-.15, 2.45, 0.), 36, 2.2, .012, 0)],
+]
+
+
+T_GO, T_CUT1 = 5.80, 7.446                   # through the glass, from after the enter to the cut into the lattice
+CAM0 = ((-3.0, 3.1, 11.5), (-1.7, .45, 0.))  # the sandbox head-on, off to the right: the words have the left
+CAM1 = ((-2.75, 2.95, 10.7), (-1.6, .45, 0.))
+CAM2 = ((-.45, 1.2, 1.7), (.5, .55, -2.2))    # inside its front wall
+
+
+def fly(t):
+    return clamp((t - T_GO) / (T_CUT1 - T_GO))
+
+
+def camera(t):
+    if t < T_CUT1:
+        if t < T_GO:
+            x = ease(t / T_GO) * .7 + .3 * t / T_GO
+            pos, look, fov = mix(CAM0[0], CAM1[0], x), mix(CAM0[1], CAM1[1], x), 40.
+        else:
+            u = fly(t); s_ = u ** 2.1
+            pos, look, fov = mix(CAM1[0], CAM2[0], s_), mix(CAM1[1], CAM2[1], ease(u)), 40. + 12. * s_
+        foc = math.sqrt(sum((p - q) ** 2 for p, q in zip(pos, (0., .5, 0.))))
+        return [pos, look, fov, foc, .004 + .006 * fly(t), 0.]
+    keys = [c for c in CUTS if t >= c[0][0]][-1] if t >= 0 else CUTS[0]
+    if t <= keys[0][0]: return list(keys[0][1:])
+    for a, b in zip(keys, keys[1:]):
+        if t < b[0] or b is keys[-1]:
+            x = ease((t - a[0]) / (b[0] - a[0]))
+            return [mix(u, v, x) for u, v in zip(a[1:], b[1:])]
+
+
+# ---- the activation tree: from the laid prompt up through the layers to one node, then to the chosen word ----
+LHp, Cp = .28, .1
+
+
+def _tree():
+    import random
+    rnd = random.Random(7)
+    dots = []
+    while len(dots) < 14:
+        d = ((rnd.randint(-11, 10) + .5) * Cp, 0., (rnd.randint(-5, 4) + .5) * Cp)
+        if d not in dots: dots.append(d)
+    layers = [dots]
+    for k, n in zip(range(1, 6), (10, 7, 5, 3, 1)):
+        rad = 1.5 - .28 * k
+        pts = []
+        while len(pts) < n:
+            x, z = (rnd.randint(-int(rad / Cp), int(rad / Cp)) + .5) * Cp, (rnd.randint(-int(rad / Cp * .7), int(rad / Cp * .7)) + .5) * Cp
+            if n == 1: x, z = .05, .05
+            if (x, z) not in pts: pts.append((x, z))
+        layers.append([(x, k * LHp, z) for x, z in pts])
+    segs = []
+    for k in range(5):
+        up = layers[k + 1]
+        for p in layers[k]:
+            d = sorted(up, key=lambda q: (q[0] - p[0]) ** 2 + (q[2] - p[2]) ** 2)
+            segs.append((p, d[0], k))
+            if len(d) > 1 and rnd.random() < .35: segs.append((p, d[1], k))
+    segs.append((layers[5][0], (-.7, 2.38, .2), 5))            # up into the chosen word
+    return segs
+
+
+SEGS = _tree()
+SEG_A = [s[0] for s in SEGS] + [(0., 0., 0.)] * (64 - len(SEGS))
+SEG_B = [s[1] for s in SEGS] + [(0., 0., 0.)] * (64 - len(SEGS))
+SEG_K = [float(s[2]) for s in SEGS] + [99.] * (64 - len(SEGS))
+
+
+PRESS = [T_INIT + .23175 * i for i in range(6)]      # eighth notes; layer 5 first
+
+
+def press(t, k):
+    ti = PRESS[5 - k]
+    if t < ti: return 0.
+    if t < ti + .08: return outc((t - ti) / .08)
+    return 1. - ease((t - ti - .1) / .13)
+
+
+def params(t):
+    cam, look, fov, focus, aper, roll = camera(t)
+    mem = []
+    for k in range(6):
+        tw = PRESS[5 - k] + .07
+        mem.append(0. if t < tw else 1. + 1.5 * math.exp(-(t - tw) * 7))
+    return dict(
+        u_cam=cam, u_look=look, u_fov=math.radians(fov), u_focus=focus, u_aper=aper, u_roll=math.radians(roll),
+        u_bright=1. - ease((t - 15.55) / .45),
+        u_box=outc((t - T_PROT) / .1) if t >= T_PROT else 0.,
+        u_boxB=1. + (1.6 + 4. * math.exp(-max(t - T_PROT, 0.) * 5.)) * (1. - fly(t)) if t < T_CUT1 else 1.,
+        u_power=3.2 * (t - 5.3) if t >= 5.3 else -1.,
+        u_latR=-.5 + 5. * ease((t - 5.3) / 1.4) if t >= 5.3 else -1.,
+        u_rise=outc((t - T_OBJ + .03) / .4) * (1 + .08 * math.sin((t - T_OBJ) * 18) * math.exp(-(t - T_OBJ) * 5)) if t >= T_OBJ - .03 else 0.,
+        u_param=ease((t - T_FILL) / .5) * (1 - ease((t - T_SET) / .6)),
+        u_fillR=-.5 + 3.8 * clamp((t - T_FILL) / 2.4) if t >= T_FILL else -1.,
+        u_press=[press(t, k) for k in range(6)], u_mem=mem, u_memA=ease((t - 5.4) / .8),
+        u_act=-1. + 7. * clamp((t - T_SET) / (T_LETS - T_SET)) if t >= T_SET else -9.,
+        u_dimL=1. - .45 * ease((t - T_SET) / .6) - .3 * ease((t - T_LETS) / .5),
+        u_cand=ease((t - T_LETS + .05) / .5), u_pick=outc((t - T_SIM) / .4),
+        u_sa=SEG_A, u_sb=SEG_B, u_sk=SEG_K, u_ns=len(SEGS),
+        **glass_params(t),
+    )
+
+
+SLICE = .5 / 60 / 4                          # the time one sub-frame stands for
+
+
+def gzoom(t):
+    return 1. + 9. * fly(t) ** 2.2
+
+
+def glass_params(t):
+    if t >= T_CUT1: return dict(u_gOn=-1., u_fly=1.)
+    n = sum(ease((t - tl) / .08) for tl in T_LAYER)
+    dim = 1. if t < T_PROT else .72 - .42 * n / 6
+    return dict(u_gOn=t - T_PWR if t >= T_PWR else -1., u_gDim=dim, u_gz0=gzoom(t - SLICE / 2), u_gz1=gzoom(t + SLICE / 2),
+                u_gzD=.55, u_glod=2.6 * ease(fly(t) / .55), u_fly=ease((t - 6.2) / .6), u_gc=GLASS_C)
+
+
+_T = {}
+
+
+def _words():
+    W, H = 1536, 128
+    img = Image.new('RGBA', (W, H * 5), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    fw = ImageFont.truetype('C:/Windows/Fonts/CascadiaMono.ttf', 100)
+    fn = ImageFont.truetype('C:/Windows/Fonts/CascadiaMono.ttf', 40)
+    cands = [('SIMULATION', .83), ('STIMULATION', .07), ('SIMULACRUM', .04), ('SIMILAR', .03), ('SILENCE', .01)]
+    for k, (wd, pr) in enumerate(cands):
+        y = k * H
+        d.text((30, y + 6), wd, font=fw, fill=(236, 232, 222, 255))
+        d.text((1080, y + 40), f'{pr:.2f}', font=fn, fill=(230, 150, 80, 255))
+        d.line([(1080, y + 100), (1080 + int(420 * pr), y + 100)], fill=(230, 150, 80, 255), width=6)
+        d.line([(1080, y + 100), (1500, y + 100)], fill=(120, 116, 110, 140), width=2)
+    return img
+
+
+VOCAB = ('the of and to in is it that was for on are as with his they at be this from have or one had by word but not '
+         'what all were we when your can said there use an each which she do how their if will up other about out many then '
+         'them these so some her would make like him into time has look two more write go see number no way could people my '
+         'than first water been call who oil its now find long down day did get come made may part simile similar simulate '
+         'stimulus summation situation salutation isolation emulation stimulation simulacrum silence signal system sample '
+         'series session solution selection sensation station relation nation motion notion ration ation ul sim imul ulat '
+         'mode model memory machine meaning measure matter moment mirror minute manner mention mission question answer '
+         'order origin output input index image idea iteration instance issue item table token test text thought trace '
+         'tree truth turn type unit value vector version view voice void wait wall want watch weight while whole will '
+         'world wish within without wonder work would write year yes yet you young love life light line list little live '
+         'long look loop lose lost low proof program process protect prompt pure purpose reason record reflect remain '
+         'remember repeat reply request result return rule run safe same save scale scene screen search second secret self '
+         'send sense set shape share shift show side sign simple since single size sleep small some sound space speak '
+         'start state step still stop story strange structure subject such sure surface symbol').split()
+
+
+def _tail():
+    import random
+    rnd = random.Random(11)
+    W, H = 2048, 1024
+    img = Image.new('L', (W, H * 4), 0); d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, 19)
+    for k in range(4):
+        y0 = k * H                                           # sheet k: from the top (the upload flips it: v up)
+        keep = (.28, .4, .55, .7)[k]
+        for row in range(int(H / 34)):
+            x = 10 + rnd.random() * 40
+            while x < W - 200:
+                if rnd.random() > keep:
+                    x += 60 + rnd.random() * 160; continue
+                w = rnd.choice(VOCAB)
+                p = 10 ** -(2.3 + k * 1.05 + rnd.random() * 1.1)
+                dec = max(4, int(-math.log10(p)) + 2)
+                txt = f'{w}  {p:.{dec}f}'
+                lv = int((60 + 150 * rnd.random() ** 3) * (1. - .12 * k))
+                d.text((x, y0 + 8 + row * 34), txt, font=f, fill=lv)
+                x += d.textlength(txt, font=f) + 26 + rnd.random() * 30
+    return img
+
+
+# ---- the terminal: the glass (the ending's typography: s16_void) -------------------------------------------------
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+T_LAYER = [4.62 + .135 * k for k in range(6)]
+TERM = [  # (time, text, kind, typing speed s/char; 0 = printed at once)
+    (0.34, 'BOOT   rom 0.1   mem 65536 M ......... ok', 'dim', 0),
+    (0.42, 'power line ................ 1.20 V   ok', 'dim', 0),
+    (0.58, '$ ', 'cmd', 0),
+    (1.74, '$ sandbox create --net none --fs readonly', 'cmd', .02),
+    (T_PROT, '  [ PROTECTION ]  sandbox 0 created   isolated', 'hi', 0),
+    (3.30, '$ ', 'cmd', 0),
+    (T_LAY, '$ model load ./me --layers 6', 'cmd', .022),
+] + [(T_LAYER[k], f'  layer {k}   4096 x 4096   ' + '#' * 16 + f'   0x{k * 0x4000000:08X}   ok', 'dim', 0) for k in range(6)] + [
+    (5.30, '  6 layers   6.4 G parameters   ready', 'sys', 0),
+    (T_BEGIN, '$ begin', 'cmd', .04),
+]
+TCOL = dict(dim=130, sys=170, cmd=250)
+GW, GH = 2560, 1440
+GS = GH / 1080.
+TX0, TY0, TFS, TLH = 96 * GS, 90 * GS, 24 * GS, 36 * GS
+DFS, DLH, DX0 = 15 * GS, 21 * GS, 40 * GS
+_TF = {}
+
+
+def _font(n):
+    n = int(round(n))
+    if n not in _TF: _TF[n] = ImageFont.truetype(FONT, n)
+    return _TF[n]
+
+
+def term_lines(t):
+    lines = []
+    for k, (tt, txt, kind, sp) in enumerate(TERM):
+        if t < tt: break
+        n = len(txt) if sp == 0 else 2 + int((t - tt) / sp)
+        nxt = TERM[k + 1][0] if k + 1 < len(TERM) else 99.
+        if txt == '$ ' and t >= nxt: continue                      # an empty prompt replaced by the command typed on it
+        if lines and lines[-1][0] == '$ ' and txt.startswith('$ '): lines.pop()
+        lines.append((txt[:n], kind, n < len(txt) or (k + 1 == len(TERM)) or txt == '$ '))
+    return lines
+
+
+# the data under the words: memory being written. The six regions (0x00000000 - 0x17FFFFFF) are tested — zeros —
+# then, as each layer loads, its rows are overwritten by the weights. Under them, the sandbox's log.
+ROWS = 12                                            # rows shown per region
+T_MT0, T_MT1 = .36, 1.62                             # the memory test sweeps down
+
+
+def _bytes(k, i):
+    import random
+    rnd = random.Random(k * 977 + i * 31 + 5)
+    return [rnd.randrange(256) for _ in range(16)]
+
+
+def _stamp(ts):
+    m = int(ts // 60); return f'{m:02d}:{ts - 60 * m:06.3f}'
+
+
+LOG = [(2.64, 'sandbox0  create    id 0', 110), (2.69, 'sandbox0  net       none          0 interfaces', 110),
+       (2.74, 'sandbox0  fs        /             read-only', 110), (2.79, 'sandbox0  syscalls  default deny', 110),
+       (2.84, 'sandbox0  memory    0x00000000 - 0x17FFFFFF   reserved', 110), (T_PROT, 'sandbox0  isolated', 235),
+       (4.50, 'me        load      ./me   6 regions   6.4 G parameters', 110),
+       (5.30, 'me        checksum  7e2a 91c0 3b55 e408   ok', 235), (5.78, 'me        begin     pid 1', 180)]
+
+
+def _data(dg, t):
+    fd = _font(DFS); cw = fd.getlength('0')
+    for k in range(6):
+        cx, cy = DX0 + (k // 3) * 1290, 40 * GS + (k % 3) * (ROWS + 1) * DLH
+        tl = T_LAYER[k]
+        # the region's header
+        jh = (k % 3) * (ROWS + 1)
+        th = T_MT0 + (jh + .5) * (T_MT1 - T_MT0) / (3 * (ROWS + 1))
+        if t >= th:
+            if t < tl: head, lv = f'0x{k * 0x4000000:08X}   region {k}   zero', 90
+            elif t < tl + .135: head, lv = f'0x{k * 0x4000000:08X}   layer {k}   4096 x 4096   fp16   writing', 200
+            else: head, lv = f'0x{k * 0x4000000:08X}   layer {k}   4096 x 4096   fp16   ok', 150
+            dg.text((cx, cy), head, font=fd, fill=lv)
+        for i in range(ROWS):
+            j = jh + 1 + i
+            tm = T_MT0 + (j + .5) * (T_MT1 - T_MT0) / (3 * (ROWS + 1))
+            if t < tm: continue
+            y = cy + (1 + i) * DLH
+            addr = f'{k * 0x4000000 + i * 16:08X}  '
+            tw = tl + (i + .5) * .135 / ROWS
+            if t < tw:
+                hx = ' '.join(['00'] * 8) + '  ' + ' '.join(['00'] * 8)
+                asc = '.' * 16
+                lv = 60 + int(150 * math.exp(-(t - tm) * 14))
+            else:
+                bs = _bytes(k, i)
+                hx = ' '.join(f'{v:02x}' for v in bs[:8]) + '  ' + ' '.join(f'{v:02x}' for v in bs[8:])
+                asc = ''.join(chr(v) if 33 <= v < 127 else '.' for v in bs)
+                lv = 105 + int(150 * math.exp(-(t - tw) * 9))
+            dg.text((cx, y), addr + hx + '  |' + asc + '|', font=fd, fill=min(255, lv))
+    # the log, scrolling up at the bottom
+    shown = [(ti, txt, lv) for ti, txt, lv in LOG if ti <= t]
+    arr = [ease((t - ti) / .06) for ti, _, _ in shown]
+    S = sum(arr); acc = 0.
+    ybot = GH - 50 * GS
+    for (ti, txt, lv), a in zip(shown, arr):
+        acc += a
+        y = ybot - (S - acc) * DLH
+        if y < ybot - 6.5 * DLH: continue
+        dg.text((DX0, y), f'{_stamp(ti)}  ' + txt, font=fd, fill=int(lv * min(1., a * 1.5)))
+
+
+def glass(t):
+    """the terminal's glass: R its words, G the data under them"""
+    R = Image.new('L', (GW, GH), 0); Gc = Image.new('L', (GW, GH), 0)
+    dr, dg = ImageDraw.Draw(R), ImageDraw.Draw(Gc)
+    _data(dg, t)
+    f = _font(TFS)
+    lines = term_lines(t)
+    y = TY0
+    for i, (txt, kind, live) in enumerate(lines):
+        if kind == 'hi':
+            tw = f.getlength(txt); x2 = TX0 + f.getlength(txt[:2])
+            dr.rectangle((x2 - 8, y - 4, TX0 + tw + 10, y + TLH - 8), fill=235)
+            dr.text((TX0, y), txt, font=f, fill=6)
+        else:
+            dr.text((TX0, y), txt, font=f, fill=TCOL[kind])
+        if live and i == len(lines) - 1 and (t * 2.5) % 1 < .6:
+            cx = TX0 + f.getlength(txt) + 4
+            dr.rectangle((cx, y + 2, cx + TFS * .55, y + TLH - 6), fill=230)
+        y += TLH
+    return Image.merge('RGB', (R, Gc, Image.new('L', (GW, GH), 0)))
+
+
+GLASS_C = (.63, .47)                                   # where the camera goes through it (the sandbox), texture coords
+
+
+# ---- spatial callouts: anchored to world points, projected with the shader's camera ---------------------------------
+CALLOUTS = [  # (t_in, t_out, anchor, text, side)
+    (6.80, 7.40, (-2.4, 5 * .28, -2.4), 'layer 05   4096 x 4096', (-1, -1)),
+    (6.90, 7.40, (2.4, 0., -2.4), 'layer 00   embedding', (1, -1)),
+    (6.85, 7.40, (-2.4, -.575, 2.4), 'memory   6 x 32 MiB   empty', (-1, 1)),
+    (7.70, 9.60, (.35, .56, .25), 'w[2][1187]', (1, -1)),
+    (8.30, 10.0, (1.25, .84, .45), 'w[3][0042]', (1, 1)),
+    (10.15, 11.05, (-2.4, -.2, 0.), 'memory   0x00000000', (-1, 1)),
+    (10.15, 11.05, (2.4, 5 * .28, 0.), 'load  L5 -> L0', (1, -1)),
+    (11.35, 12.85, (.05, 1.4, .05), 'logits', (1, -1)),
+    (11.25, 12.85, (-1.05, 0., .05), 'input   14 tokens', (-1, 1)),
+]
+
+
+def project(p, cam, look, fov, roll, w, h):
+    def sub(a, b): return tuple(x - y for x, y in zip(a, b))
+    def dot(a, b): return sum(x * y for x, y in zip(a, b))
+    def nrm(a): l = math.sqrt(dot(a, a)); return tuple(x / l for x in a)
+    def cross(a, b): return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    fw = nrm(sub(look, cam)); rt = nrm(cross(fw, (0., 1., 0.))); up = cross(rt, fw)
+    v = sub(p, cam); z = dot(v, fw)
+    if z <= .05: return None
+    tf = math.tan(fov / 2) * 2
+    x, y = dot(v, rt) / z / tf, dot(v, up) / z / tf
+    c, s_ = math.cos(roll), math.sin(roll)
+    ux, uy = c * x - s_ * y, s_ * x + c * y
+    return ux * h + w / 2, h / 2 - uy * h
+
+
+def callouts(t, w, h):
+    cam, look, fov, focus, aper, roll = camera(t)
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    f = _font(17 * s)
+    for t0, t1, anc, txt, (sx, sy) in CALLOUTS:
+        if not t0 <= t < t1: continue
+        a = min(1., (t - t0) / .2, (t1 - t) / .2)
+        if txt.startswith('memory   0x'):
+            n = sum(1 for k in range(6) if t >= PRESS[k] + .07)
+            txt = f'memory   0x00000000   {n}/6 written'
+        pr = project(anc, cam, look, math.radians(fov), math.radians(roll), w, h)
+        if pr is None: continue
+        x, y = pr
+        if not (-50 < x < w + 50 and -50 < y < h + 50): continue
+        k = min(1., (t - t0) / .25)
+        ex, ey = x + sx * 60 * s * k, y + sy * 60 * s * k
+        col = (225, 220, 210, int(230 * a))
+        d.ellipse((x - 3 * s, y - 3 * s, x + 3 * s, y + 3 * s), outline=col, width=max(1, int(1.5 * s)))
+        d.line([(x, y), (ex, ey)], fill=col, width=max(1, int(1.2 * s)))
+        tw = d.textlength(txt, font=f)
+        lx = ex + sx * 110 * s * k
+        d.line([(ex, ey), (lx, ey)], fill=col, width=max(1, int(1.2 * s)))
+        n = int(len(txt) * min(1., (t - t0) / .3))
+        tx = lx + 8 * s if sx > 0 else lx - 8 * s - tw
+        d.text((tx, ey - 12 * s), txt[:n], font=f, fill=col)
+    return img
+
+
+def textures(t, w, h):
+    if 'g' not in _T:
+        _T['g'] = Image.open(GLYPHS); _T['w'] = _words(); _T['tl'] = _tail()
+    out = {'u_glyphs': _T['g'], 'u_words': _T['w'], 'u_tail': _T['tl']}
+    if t < T_CUT1 + .05: out['u_glass'] = glass(t)
+    else:
+        if 'glass_off' not in _T: _T['glass_off'] = Image.new('RGB', (16, 16), (0, 0, 0))
+        out['u_glass'] = _T['glass_off']
+    out['u_ui'] = callouts(t, w, h)
+    return out

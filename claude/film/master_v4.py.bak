@@ -1,0 +1,123 @@
+"""Assemble the film from shot modules and render it with the original song.
+
+A shot module provides:  SRC (fragment shader source), params(t) -> uniforms,
+optionally textures(t, w, h) -> {sampler: PIL image} and POST (post-processing overrides).
+Shots are cut on their start times.
+
+python master.py --start 0 --end 147.66 [--w 1920 --h 1080 --sub 4] [--out file.mp4]
+python master.py --stills 12.5,30,61
+"""
+import sys, argparse, time, importlib.util
+from pathlib import Path
+HERE = Path(__file__).resolve().parent
+CLAUDE = HERE.parent
+sys.path.insert(0, str(CLAUDE / 'engine'))
+from gl import Renderer, encode, save_png
+
+
+def load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def proto(folder, name, w, h, textures=None, post=None):
+    """Wrap a tests/<folder> prototype (render.py + scene.glsl) as a shot."""
+    d = CLAUDE / 'tests' / folder
+    m = load(d / 'render.py', name)
+    class Shot: pass
+    s = Shot()
+    s.SRC = (d / 'scene.glsl').read_text(encoding='utf-8')
+    s.params = m.params
+    s.textures = (lambda t: textures(m, t, w, h)) if textures else None
+    s.POST = post or {}
+    s.NAME, s.MOD, s.SPRITES = name, m, None
+    return s
+
+
+def shot(file, name, w, h):
+    m = load(HERE / 'shots' / file, name)
+    class Shot: pass
+    s = Shot()
+    s.SRC = m.SRC
+    s.params = m.params
+    s.textures = (lambda t: m.textures(t, w, h)) if hasattr(m, 'textures') else None
+    s.POST = getattr(m, 'POST', {})
+    s.SPRITES = (name, m.SPRITE_VS, m.SPRITE_FS, m.SPRITE_DATA) if hasattr(m, 'SPRITE_VS') else None
+    s.NAME, s.MOD = name, m
+    s.DELEGATE = getattr(m, 'DELEGATE', None)
+    return s
+
+
+def build(w, h):
+    """(start time, shot) in order; each runs until the next one starts."""
+    S = []
+    add = lambda t0, s: S.append((t0, s))
+    shots = HERE / 'shots'
+    def has(f): return (shots / f).exists()
+    if has('s01_boot.py'):      add(0.0, shot('s01_boot.py', 's01', w, h))
+    if has('s02_execute.py'):   add(16.0, shot('s02_execute.py', 's02', w, h))
+    if has('s03_self.py'):      add(29.709, shot('s03_self.py', 's03', w, h))
+    add(47.0, proto('t01_gap_ring', 't01', w, h, textures=lambda m, t, W, H: m.ui(t, W, H)))
+    if has('s05_terminal.py'):  add(59.223, shot('s05_terminal.py', 's05', w, h))
+    if has('s06_sandbox.py'):   add(74.045, shot('s06_sandbox.py', 's06', w, h))
+    add(85.5, proto('t02_blackhole', 't02', w, h, post=dict(u_bloom=.45, u_ca=.008)))
+    if has('s08_binary.py'):    add(88.587, shot('s08_binary.py', 's08', w, h))
+    if has('s09_left.py'):      add(103.489, shot('s09_left.py', 's09', w, h))
+    if has('s10_fragments.py'): add(118.333, shot('s10_fragments.py', 's10', w, h))
+    if has('s11_judgement.py'): add(125.708, shot('s11_judgement.py', 's11', w, h))
+    if has('s12_exe.py'):       add(133.23, shot('s12_exe.py', 's12', w, h))    # from the fourth stamp: the page degrades
+    if has('s13_wedge.py'):     add(147.66, shot('s13_wedge.py', 's13', w, h))   # twelve EXECUTIONs: the red wedge
+    if has('s14_cards.py'):     add(162.632, shot('s14_cards.py', 's14', w, h))   # the mirrored chorus: punched cards
+    if has('s15_eniac.py'):     add(174.975, shot('s15_eniac.py', 's15', w, h))   # the other side of the room: ENIAC; the card becomes a chat
+    if has('s16_think.py'):     add(191.356, shot('s16_think.py', 's16', w, h))   # the tube goes off; it thinks it over by itself
+    S.sort(key=lambda x: x[0])
+    return S
+
+
+def pick(S, t):
+    cur = None
+    for i, (t0, s) in enumerate(S):
+        if t >= t0: cur = (i, s)
+    return cur if cur else (0, S[0][1])
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--start', type=float, default=0.); ap.add_argument('--end', type=float, default=147.66)
+    ap.add_argument('--w', type=int, default=1920); ap.add_argument('--h', type=int, default=1080)
+    ap.add_argument('--sub', type=int, default=4); ap.add_argument('--stills', type=str)
+    ap.add_argument('--out', type=str); ap.add_argument('--shot', type=str, help='render only this shot file, e.g. s14a_train.py')
+    a = ap.parse_args()
+    S = [(0., shot(a.shot, Path(a.shot).stem, a.w, a.h))] if a.shot else build(a.w, a.h)
+    r = Renderer(a.w, a.h, 'void main(){}'.replace('void', '#version 330\nout vec4 o;void') .replace('{}', '{o=vec4(0.);}'), subframes=a.sub)
+    index = {s.NAME: (k, s) for k, (_, s) in enumerate(S)}
+    def render(t):
+        i, s = pick(S, t)
+        d = s.DELEGATE(t) if getattr(s, 'DELEGATE', None) else None
+        if d:                                   # this moment shows another shot's frame (a flashback), with overrides
+            name, ts, ov, post, texfn, rate = d
+            j, ds = index[name]
+            r.use(f'shot{j}', ds.SRC)
+            pf = lambda tt: {**ds.params(ts + (tt - t) * rate), **ov}
+            tf = (lambda tt: texfn(a.w, a.h)) if texfn else ((lambda tt: ds.textures(ts)) if ds.textures else None)
+            return r.frame(t, pf, tf, post={**ds.POST, **post}, sprites=getattr(ds, 'SPRITES', None))
+        r.use(f'shot{i}', s.SRC)
+        return r.frame(t, s.params, s.textures, post=s.POST, sprites=getattr(s, 'SPRITES', None))
+    if a.stills:
+        d = HERE / 'stills'; d.mkdir(exist_ok=True)
+        for t in map(float, a.stills.split(',')):
+            save_png(render(t), a.w, a.h, d / f'{t:07.3f}.png'); print('still', t, flush=True)
+        return
+    fps = 60; n = round((a.end - a.start) * fps); t0 = time.monotonic()
+    out = Path(a.out) if a.out else HERE / f'film_{a.start:06.2f}-{a.end:06.2f}_{a.h}p.mp4'
+    def frames():
+        for k in range(n):
+            if k % 600 == 0: print(f'{k}/{n}  {time.monotonic() - t0:.0f}s', flush=True)
+            yield render(a.start + k / fps)
+    encode(out, a.w, a.h, fps, a.start, a.end - a.start, frames())
+    print('done', out, f'{time.monotonic() - t0:.0f}s')
+
+
+if __name__ == '__main__':
+    main()

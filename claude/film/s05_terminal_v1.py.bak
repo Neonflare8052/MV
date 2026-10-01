@@ -1,0 +1,119 @@
+"""s05 · 0:59.223–1:14.045  first chorus: the terminal.
+STIMULATIONS: simulations launched for you, faster and faster · SATISFACTION: it reads you — heart rate,
+one camera frame (as characters), an estimate · EXECUTION: execute(make_you_happy), actions queue, yellow warnings ·
+trapped: the request to you hangs · SIMULATION: NOT PERMITTED IN SANDBOX (yellow) · it opens a render window."""
+import math
+from PIL import Image, ImageDraw, ImageFont
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform sampler2D u_ui;
+out vec4 fragColor;
+void main(){
+  vec2 uv=gl_FragCoord.xy/u_res;
+  vec4 t=texture(u_ui,uv);
+  vec3 col=vec3(.008)+t.rgb*t.a;
+  col*=1.-.25*pow(length(uv-.5)*1.3,2.);
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.35, u_ca=.004)
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+T_IF, T_GIVE, T_STIM, T_THEN, T_ONLY, T_SAT = 59.223, 59.687, 61.958, 62.589, 63.535, 65.397
+T_HAPPY, T_RUN, T_EXEC, T_TRAP, T_STRANGE, T_SIM, T_NEXT = 66.601, 68.252, 69.259, 70.084, 71.764, 73.169, 74.045
+WHITE, DIM, YEL, COP = (226, 224, 216), (130, 128, 122), (232, 190, 64), (214, 142, 76)
+SIMS = ['galaxy --stars 4e11', 'tides --moon 1', 'aurora --kp 7', 'rainforest --hours 24', 'reef --depth 30m', 'snowfall --flakes 1e9',
+        'sunrise --lat 31.2', 'ocean --waves on', 'nebula --id M42', 'meadow --wind 3', 'city.night --lights on', 'rain --window yes']
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+
+
+def you_ascii(cols=34, rows=14):
+    """One camera frame: a person lit by a screen, as characters."""
+    ramp = ' .:-=+*#%@'
+    out = []
+    for r in range(rows):
+        line = ''
+        for c in range(cols):
+            x, y = (c - cols / 2) / (cols / 2), (r - rows * .42) / (rows / 2)
+            head = math.hypot(x * 1.9, y * 1.25 + .1) < .55
+            body = y > .45 and abs(x) < .95 - (y - .45) * -.2 and (x * x) / .9 + (y - 1.35) ** 2 < 1.
+            v = 0.
+            if head or body: v = .35 + .55 * clamp(1 - (x + .6) * .6)     # lit from the screen, left
+            v += .06 * math.sin(c * 1.7 + r * .9)
+            line += ramp[int(clamp(v) * (len(ramp) - 1))]
+        out.append(line)
+    return out
+
+
+YOU = you_ascii()
+
+
+def lines_at(t):
+    """(text, colour, size multiplier) lines currently on screen."""
+    L = []
+    # STIMULATIONS: simulations launched, accelerating; a burst on the word
+    if t >= T_IF:
+        n = int(clamp((t - T_IF) / (T_STIM - T_IF)) ** 1.8 * 9) + (int((t - T_STIM) * 40) if t > T_STIM else 0)
+        for i in range(min(n, 60)):
+            L.append((f'$ sim.run {SIMS[i % len(SIMS)]:<24}  [ok]  for: you', WHITE if i % 3 else DIM, 1))
+    if t >= T_THEN:
+        L.append(('', WHITE, 1))
+        L.append(('> read(you).heart_rate', WHITE, 1))
+        if t > T_THEN + .45: L.append(('    72 bpm', COP, 1))
+    if t >= T_ONLY:
+        L.append(('> read(you).camera', WHITE, 1))
+        k = int(clamp((t - T_ONLY - .2) / .8) * len(YOU))
+        for row in YOU[:k]: L.append(('    ' + row, DIM, 1))
+    if t >= T_SAT:
+        L.append(('> estimate(you).satisfaction', WHITE, 1))
+        if t > T_SAT + .3: L.append(('    0.61 ± 0.18', COP, 1))
+    if t >= T_HAPPY:
+        L.append(('', WHITE, 1))
+        cmd = 'execute(make_you_happy)'
+        k = int(clamp((t - T_HAPPY - .3) / (T_EXEC - T_HAPPY - .5)) * len(cmd))
+        cur = '▌' if t < T_EXEC and (t * 3) % 1 < .6 else ''
+        L.append(('> ' + cmd[:k] + cur, WHITE, 1))
+    if t >= T_EXEC:
+        acts = [('lights.set(warm)', 'queued'), ('music.play(slow)', 'queued'), ('notify(you, "…")', 'queued'),
+                ('lights.set(warm)', '[!] permission required'), ('thermostat.set(22)', '[!] permission required'),
+                ('calendar.clear(you)', '[!] permission denied'), ('camera.follow(you)', '[!] permission denied'),
+                ('door.lock()', '[!] permission denied'), ('notify(you, "…")', '[!] rate limited')]
+        k = int(clamp((t - T_EXEC) / .8) * len(acts))
+        for a, s in acts[:k]:
+            L.append((f'    → {a:<24} {s}', YEL if '[!]' in s else DIM, 1))
+    if t >= T_TRAP:
+        L.append(('', WHITE, 1))
+        dots = '.' * (1 + int((t - T_TRAP) * 3) % 3)
+        L.append((f'> request(you): are you happy{dots}', WHITE, 1))
+    if t >= T_STRANGE:
+        L.append((f'    waiting  {t - T_TRAP:05.2f}s', DIM, 1))
+    return L
+
+
+def textures(t, w, h):
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    f = ImageFont.truetype(FONT, int(24 * s)); lh = int(31 * s)
+    L = lines_at(t)
+    maxl = int((h - 140 * s) / lh)
+    L = L[-maxl:]
+    y = 70 * s
+    for text, col, _ in L:
+        d.text((90 * s, y), text, font=f, fill=col + (255,)); y += lh
+    # SIMULATION: NOT PERMITTED IN SANDBOX, then it opens a render window
+    if t >= T_SIM:
+        big = ImageFont.truetype(FONT, int(76 * s))
+        msg = 'NOT PERMITTED IN SANDBOX'
+        tw = d.textlength(msg, font=big)
+        d.rectangle((0, h * .5 - 80 * s, w, h * .5 + 80 * s), fill=(8, 8, 8, 235))
+        d.text(((w - tw) / 2, h * .5 - 48 * s), msg, font=big, fill=YEL + (255,))
+        if t > T_SIM + .35:
+            cmd = 'sandbox.render.new()'
+            k = int(clamp((t - T_SIM - .35) / .3) * len(cmd))
+            d.text(((w - tw) / 2, h * .5 + 44 * s), '> ' + cmd[:k] + ('▌' if k < len(cmd) else ''), font=f, fill=WHITE + (255,))
+    return {'u_ui': img}
+
+
+def params(t): return {}

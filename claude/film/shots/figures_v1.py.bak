@@ -1,0 +1,251 @@
+"""Hands, sleeves and the file cabinet, seen from straight above, lit by the desk lamp.  (for s14e_desk)
+
+Everything is built in world metres and drawn onto a supersampled RGBA layer.  Volume comes from a height map:
+each part (palm, finger segment, sleeve) is a mask whose distance-to-edge is turned into a rounded height, the parts
+are merged by max (so there are grooves between fingers), normals come from its gradient and are lit from the lamp."""
+import math, random
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
+
+SKIN = np.array([200, 156, 132], float) / 255
+NAIL = np.array([222, 186, 172], float) / 255
+JACKET = np.array([46, 44, 46], float) / 255
+SHIRT = np.array([226, 222, 212], float) / 255
+
+
+def _cap(a, b, ra, rb, n=12):
+    """a tapered capsule from a (radius ra) to b (radius rb)"""
+    dx, dy = b[0] - a[0], b[1] - a[1]; L = math.hypot(dx, dy) or 1e-6
+    ang = math.atan2(dy, dx)
+    pts = []
+    for i in range(n + 1):
+        th = ang - math.pi / 2 + math.pi * i / n
+        pts.append((b[0] + rb * math.cos(th), b[1] + rb * math.sin(th)))
+    for i in range(n + 1):
+        th = ang + math.pi / 2 + math.pi * i / n
+        pts.append((a[0] + ra * math.cos(th), a[1] + ra * math.sin(th)))
+    return pts
+
+
+# ---------------- the hand's skeleton
+# per finger: knuckle (u, v·side), segment lengths, radii at base and tip
+FINGERS = [((.094, .029), (.040, .025, .021), (.0098, .0080)),      # index (nearest the thumb)
+           ((.097, .0095), (.046, .028, .022), (.0100, .0082)),     # middle
+           ((.093, -.0095), (.043, .026, .021), (.0095, .0078)),    # ring
+           ((.083, -.028), (.033, .020, .019), (.0085, .0070))]     # little
+POSES = {  # joint flexion (rad) per finger (three joints), finger spread (rad), thumb (angle out, flexion)
+    'flat':  ([(0.05, .05, .02)] * 4, .07, (.75, .1)),
+    'point': ([(0.0, .0, .0), (1.25, 1.5, .9), (1.3, 1.5, .9), (1.3, 1.5, .9)], .03, (.35, .5)),
+    'pinch': ([(.35, .35, .2), (.4, .4, .2), (.45, .45, .25), (.5, .45, .25)], .02, (.2, .9)),
+    'grip':  ([(.9, 1.2, .8)] * 4, .0, (.3, 1.0)),
+}
+
+
+def hand_parts(wrist, ang, pose, side):
+    """list of (polygon, kind, radius) in world metres; kind: 'palm', 'finger', 'nail'"""
+    f = (math.cos(ang), math.sin(ang)); r = (-math.sin(ang), math.cos(ang))
+    sg = 1 if side == 'L' else -1                    # thumb's side along v
+    P = lambda u, v: (wrist[0] + f[0] * u + r[0] * v, wrist[1] + f[1] * u + r[1] * v)
+    flex, spread, (tha, thf) = POSES[pose]
+    parts = []
+    # palm: narrower at the wrist, the thumb's pad bulging on its side
+    palm = [P(-.004, -sg * .027), P(.03, -sg * .04), P(.083, -sg * .037), P(.097, -sg * .018), P(.1, sg * .006),
+            P(.096, sg * .03), P(.07, sg * .043), P(.04, sg * .046), P(.012, sg * .038), P(-.004, sg * .028)]
+    parts.append((palm, 'palm', .016))
+    tips = []
+    for k, ((u0, v0), Ls, (ra, rb)) in enumerate(FINGERS):
+        base = P(u0, sg * v0)
+        a = ang + sg * spread * (1.5 - k) * -1
+        cum = 0.; p = base; rr = ra
+        for j, L in enumerate(Ls):
+            cum += flex[k][j]
+            pl = L * math.cos(min(cum, math.pi / 2))
+            if cum > math.pi / 2 + .2: break                   # folded under: hidden
+            q = (p[0] + math.cos(a) * pl, p[1] + math.sin(a) * pl)
+            r1 = ra + (rb - ra) * (j + 1) / 3
+            parts.append((_cap(p, q, rr, r1), 'finger', rr * (1 - .25 * min(1, cum))))
+            p, rr = q, r1
+            if j == 2 and cum < 1.0:                           # the nail, seen when the tip points along the desk
+                nl = .011 * math.cos(cum)
+                c0 = (q[0] - math.cos(a) * (nl + .002), q[1] - math.sin(a) * (nl + .002))
+                parts.append((_cap(c0, (q[0] - math.cos(a) * .002, q[1] - math.sin(a) * .002), r1 * .7, r1 * .72), 'nail', r1 * .5))
+        tips.append(p)
+    # the thumb
+    ta = ang + sg * tha
+    t0 = P(.03, sg * .036)
+    L1, L2 = .036 * math.cos(min(thf * .5, 1.3)), .03 * math.cos(min(thf, 1.4))
+    t1 = (t0[0] + math.cos(ta) * L1, t0[1] + math.sin(ta) * L1)
+    t2 = (t1[0] + math.cos(ta - sg * .25) * L2, t1[1] + math.sin(ta - sg * .25) * L2)
+    parts.insert(1, (_cap(t0, t1, .0125, .0112), 'finger', .012))
+    if L2 > .006: parts.insert(2, (_cap(t1, t2, .0112, .0098), 'finger', .011))
+    return parts, tips
+
+
+def sleeve_parts(shoulder, wrist, ang):
+    """jacket sleeve from the shoulder to just short of the wrist; a shirt cuff showing below it"""
+    dx, dy = wrist[0] - shoulder[0], wrist[1] - shoulder[1]; L = math.hypot(dx, dy) or 1e-6
+    ux, uy = dx / L, dy / L; nx, ny = -uy, ux
+    cuff_end = (wrist[0] - ux * .004, wrist[1] - uy * .004)
+    jk_end = (wrist[0] - ux * .03, wrist[1] - uy * .03)
+    jacket = [(shoulder[0] + nx * .068, shoulder[1] + ny * .068), (jk_end[0] + nx * .047, jk_end[1] + ny * .047),
+              (jk_end[0] - nx * .047, jk_end[1] - ny * .047), (shoulder[0] - nx * .068, shoulder[1] - ny * .068)]
+    cuff = [(jk_end[0] + ux * .006 + nx * .036, jk_end[1] + uy * .006 + ny * .036), (cuff_end[0] + nx * .032, cuff_end[1] + ny * .032),
+            (cuff_end[0] - nx * .032, cuff_end[1] - ny * .032), (jk_end[0] + ux * .006 - nx * .036, jk_end[1] + uy * .006 - ny * .036)]
+    return [(cuff, 'cuff', .03), (jacket, 'jacket', .05)], (ux, uy, nx, ny, jk_end)
+
+
+def _box(a, r):
+    """box blur of radius r along both axes (cumulative sums)"""
+    r = int(max(1, r))
+    for ax in (0, 1):
+        c = np.cumsum(np.pad(a, [(r + 1, r) if i == ax else (0, 0) for i in range(2)], mode='edge'), axis=ax)
+        a = (np.take(c, range(2 * r + 1, c.shape[ax]), axis=ax) - np.take(c, range(0, c.shape[ax] - 2 * r - 1), axis=ax)) / (2 * r + 1)
+    return a
+
+
+def blur(a, s):
+    """~gaussian: three box passes"""
+    r = max(1, int(round(s * .9)))
+    for _ in range(3): a = _box(a, r)
+    return a
+
+
+def _height(mask, rpx, flat=0.):
+    """rounded height from a mask: blurred mask read as a dome, radius ~ rpx at the edge"""
+    b = blur(mask.astype(float), max(1., rpx * .45))
+    k = np.clip((b - .5) * 2, 0, 1)
+    return np.sqrt(k) * rpx
+
+
+def draw_arm(img, P, pxm, shoulder, wrist, ang, pose, side, lamp3, seed=0):
+    """draw one arm onto img (RGBA, px).  P: world -> px.  pxm: px per metre.  lamp3: (x, y, height) of the lamp, metres."""
+    hparts, tips = hand_parts(wrist, ang, pose, side)
+    sparts, (ux, uy, nx, ny, jk_end) = sleeve_parts(shoulder, wrist, ang)
+    allp = [(pl, k, r) for pl, k, r in sparts] + hparts
+    pts = [P(x, y) for pl, _, _ in allp for x, y in pl]
+    pad = 8
+    x0 = int(max(0, min(p[0] for p in pts) - pad)); y0 = int(max(0, min(p[1] for p in pts) - pad))
+    x1 = int(min(img.width, max(p[0] for p in pts) + pad)); y1 = int(min(img.height, max(p[1] for p in pts) + pad))
+    if x1 - x0 < 3 or y1 - y0 < 3: return
+    W, H = x1 - x0, y1 - y0
+    Hmap = np.zeros((H, W)); alb = np.zeros((H, W, 3)); cover = np.zeros((H, W), bool)
+    sheen = np.zeros((H, W))
+    # draw back to front: jacket, cuff, palm, thumb, fingers, nails
+    order = [p for p in allp if p[1] == 'jacket'] + [p for p in allp if p[1] == 'cuff'] + [p for p in allp if p[1] not in ('jacket', 'cuff')]
+    for pl, kind, rad in order:
+        m = Image.new('L', (W, H), 0)
+        ImageDraw.Draw(m).polygon([(P(x, y)[0] - x0, P(x, y)[1] - y0) for x, y in pl], fill=255)
+        M = np.asarray(m) > 127
+        if not M.any(): continue
+        rpx = max(1.5, rad * pxm)
+        h = _height(M, rpx)
+        base = {'jacket': .06, 'cuff': .058, 'palm': .07, 'finger': .075, 'nail': .082}[kind] * pxm
+        hh = np.where(M, h + base, 0.)
+        top = M
+        Hmap = np.where(M, np.maximum(Hmap, hh) if kind == 'nail' else hh, Hmap)
+        col = {'jacket': JACKET, 'cuff': SHIRT, 'palm': SKIN, 'finger': SKIN, 'nail': NAIL}[kind]
+        alb[top] = col
+        sheen[top] = {'jacket': .08, 'cuff': .1, 'palm': .25, 'finger': .3, 'nail': .7}[kind]
+        cover |= M
+    # fabric: folds on the jacket, a weave; skin: a faint mottle
+    r = random.Random(seed)
+    yy, xx = np.mgrid[0:H, 0:W].astype(float)
+    wx, wy = (xx + x0), (yy + y0)
+    along = (wx * ux + wy * uy) / pxm; across = (wx * nx + wy * ny) / pxm
+    fold = np.zeros((H, W))
+    for i in range(5):
+        c = r.uniform(-.4, .1); fr = r.uniform(25, 45); ph = r.uniform(0, 6)
+        fold += np.exp(-((along - c - .02 * np.sin(across * 60 + ph)) * fr * 3) ** 2) * r.uniform(.4, 1.)
+    Hmap -= np.where((alb == JACKET).all(-1), fold * .006 * pxm, 0.)
+    # normals and light
+    gy, gx = np.gradient(blur(Hmap, 1.2))
+    N = np.dstack([-gx, -gy, np.ones_like(gx)])
+    N /= np.linalg.norm(N, axis=-1, keepdims=True)
+    cx, cy = (x0 + W / 2), (y0 + H / 2)
+    wcx = wrist[0]; wcy = wrist[1]
+    L = np.array([lamp3[0] - wcx, lamp3[1] - wcy, lamp3[2]]); L /= np.linalg.norm(L)
+    Ls = np.array([L[0], L[1], L[2]])
+    ndl = np.clip(N @ Ls, 0, 1)
+    Hh = (N + np.array([0, 0, 1.])); Hh /= np.linalg.norm(Hh, axis=-1, keepdims=True)
+    spec = np.clip((Hh @ ((Ls + np.array([0, 0, 1.])) / np.linalg.norm(Ls + np.array([0, 0, 1.])))), 0, 1) ** 40
+    # occlusion: where a neighbour stands higher
+    ao = np.clip(1 - (blur(Hmap, 4) - Hmap) / (.01 * pxm), .55, 1)
+    shade = (.42 + .75 * ndl) * ao
+    rgb = alb * shade[..., None] + (sheen * spec)[..., None] * .6
+    skin = (alb == SKIN).all(-1)
+    rgb[skin] += np.array([.05, .0, -.02]) * (1 - ndl[skin])[..., None]          # a warmer shadow side
+    rgb = np.clip(rgb, 0, 1)
+    a = blur(cover.astype(float), .6)
+    out = np.dstack([rgb * 255, a * 255]).astype(np.uint8)
+    img.alpha_composite(Image.fromarray(out, 'RGBA'), (x0, y0))
+
+
+# ---------------- the file cabinet: an open box of six compartments, folders on end
+def cabinet(img, P, pxm, box, t_pull, lamp3, taken=2):
+    """box: (x0, y0, x1, y1) world.  t_pull: 0 in place .. 1 folder gone from its slot"""
+    x0, y0, x1, y1 = box
+    d = ImageDraw.Draw(img)
+    Q = lambda x, y: P(x, y)
+    def rect(a, b, c, e, fill):
+        (px0, py0), (px1, py1) = Q(a, b), Q(c, e)
+        d.rectangle([px0, py0, px1, py1], fill=fill)
+    rim = .022
+    # outer shadow on the floor
+    sh = Image.new('RGBA', img.size, (0, 0, 0, 0)); sd = ImageDraw.Draw(sh)
+    (a0, b0), (a1, b1) = Q(x0 + .02, y0 + .03), Q(x1 + .05, y1 + .05)
+    sd.rectangle([a0, b0, a1, b1], fill=(0, 0, 0, 150))
+    img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, .02 * pxm))))
+    # the carcass: wood
+    WOOD = (104, 74, 50)
+    rect(x0, y0, x1, y1, WOOD + (255,))
+    n = 6; hh = (y1 - y0 - rim) / n
+    r = random.Random(3)
+    for i in range(n):
+        cy0 = y0 + rim + i * hh; cy1 = cy0 + hh - .012
+        # the well: dark at the bottom, lighter toward the far wall's top
+        rect(x0 + rim, cy0, x1 - rim, cy1, (22, 17, 13, 255))
+        # folders on end: top edges seen from above, manila; tabs
+        m = r.randint(8, 11)
+        for j in range(m):
+            fy = cy0 + .01 + j * (cy1 - cy0 - .02) / (m - 1)
+            if i == taken and abs(j - m // 2) < 1 and t_pull > 0: continue
+            lean = r.uniform(-.004, .004)
+            tone = r.uniform(.8, 1.05)
+            col = tuple(int(c * tone) for c in (206, 182, 136)) + (255,)
+            (fa, fb), (fc, fe) = Q(x0 + rim + .006, fy + lean), Q(x1 - rim - .006, fy + lean + .0035)
+            d.rectangle([fa, fb, fc, max(fe, fb + 1.5)], fill=col)
+            if r.random() < .5:                                                     # a tab
+                tx = x0 + rim + r.uniform(.03, .28)
+                (ta, tb), (tc, te) = Q(tx, fy + lean - .004), Q(tx + .06, fy + lean + .0035)
+                d.rectangle([ta, tb, tc, te], fill=tuple(int(c * tone * 1.05) for c in (214, 192, 146)) + (255,))
+        # the divider
+        rect(x0, cy1, x1, cy1 + .012, tuple(int(c * 1.08) for c in WOOD) + (255,))
+    # rims (lit edges), label holders on the near rim, facing the desk
+    rect(x0, y0, x1, y0 + rim, tuple(int(c * 1.15) for c in WOOD) + (255,))
+    rect(x0, y0, x0 + rim, y1, tuple(int(c * 1.22) for c in WOOD) + (255,))
+    rect(x1 - rim, y0, x1, y1, tuple(int(c * .85) for c in WOOD) + (255,))
+    rect(x0, y1 - rim, x1, y1, tuple(int(c * .9) for c in WOOD) + (255,))
+    # wood grain on the rims
+    for i in range(40):
+        yy = y0 + r.uniform(0, y1 - y0)
+        (a, b), (c, e) = Q(x0 + .003, yy), Q(x0 + rim - .003, yy + .0008)
+        d.line([(a, b), (c, e)], fill=(80, 56, 38, 120), width=1)
+    return [(y0 + rim + i * hh, y0 + rim + i * hh + hh - .012) for i in range(n)]
+
+
+def folder_out(img, P, pxm, c, tilt, font, label=('C-3', 'M.U.C.', 'love letters')):
+    """the folder: seen edge-on (tilt 0) to face-up (tilt 1); c its centre (world)"""
+    d = ImageDraw.Draw(img)
+    w2, h2 = .115, .155 * max(.03, tilt)
+    (a, b), (cc, e) = P(c[0] - w2, c[1] - h2), P(c[0] + w2, c[1] + h2)
+    sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rectangle([a + .02 * pxm, b + .03 * pxm, cc + .02 * pxm, e + .03 * pxm], fill=(0, 0, 0, 120))
+    img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, .015 * pxm))))
+    d.rectangle([a, b, cc, e], fill=(212, 190, 146, 255), outline=(150, 128, 92, 255), width=max(1, int(.0015 * pxm)))
+    if tilt > .6:
+        tb = b - .018 * pxm
+        d.rectangle([a + .02 * pxm, tb, a + .09 * pxm, b + 1], fill=(218, 196, 152, 255), outline=(150, 128, 92, 255))
+        f1, f2, f3 = font(int(.028 * pxm)), font(int(.02 * pxm)), font(int(.015 * pxm))
+        d.text(((a + cc) / 2, b + .045 * pxm), label[0], font=f1, fill=(52, 40, 30, 255), anchor='mm')
+        d.text(((a + cc) / 2, b + .085 * pxm), label[1], font=f2, fill=(52, 40, 30, 255), anchor='mm')
+        d.text(((a + cc) / 2, b + .112 * pxm), label[2], font=f3, fill=(70, 56, 42, 230), anchor='mm')

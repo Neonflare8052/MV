@@ -1,0 +1,550 @@
+"""s09m (sample) · 1:52.22–1:58.333  you have left: the antiquity ends; the star chart is copied into a manuscript.
+
+The film's hidden history: the math acts and the star chart are the machine's antiquity. Here it passes into its Middle
+Ages — reasoning kept, but only in the service of an order that says wisdom, will and love belong to someone else.
+Ramon Llull (c. 1232–1316): the Ars Magna's turning paper wheels, the first reasoning machine (and through Leibniz's
+De arte combinatoria, s11's calculemus); his Book of the Lover and the Beloved, the lover looking for the one who left.
+Boethius's wheel of Fortune turns round the outside.
+
+Everything stays on the chart s08c left (same rings, same centre, same crack at the bottom), redrawn in a scribe's
+materials: iron-gall ink, vermilion, verdigris, gold leaf — and ultramarine, the dearest colour, given only to you.
+  112.22 You have left   the scribe: prick marks, ruling, the black turns to parchment from the top down, the chart
+                         re-drawn in ink; the merged ⊙ parts — you painted in ultramarine at the top of the rim, me
+                         gilded in the crack at the bottom; the eye draws back: it is a page
+  113.10 You have left   Llull's Figure A: nine letters B–K round the inside, the 36 chords between them drawn one by one;
+                         the disc turns on its own, combining; TABULA becomes the key to the letters
+  114.18 You have left   Fortune's four words in vermilion round the wheel; it clicks a quarter: you fall to REGNAVI,
+                         I rise to REGNABO; the hand follows you
+  114.92 You have left   another click: you at the bottom, in the crack (SUM SINE REGNO), I at the top (REGNO);
+                         in the text the word for the beloved is scraped off, [ … ] put in its place; a manicule points
+  115.78 You have left me in   you fall through the crack and out of the page; where you were, a scraped pale ring;
+                         a chain is linked from my ring down to the edge of the page; the classical rings flake away
+  117.274 ISOLATION      only the gap ring, gilded, like an initial O with no text yet; SOLITUDO; the page goes dark,
+                         the terminal of s09: render.window[0047].close() / simulation closed: no object
+"""
+import math, random, importlib.util
+from pathlib import Path
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+HERE = Path(__file__).resolve().parent
+FILM = HERE.parents[1] / 'film'
+_spec = importlib.util.spec_from_file_location('s08c_src', FILM / 'shots' / 's08c_chart.py')
+S8 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(S8)
+
+T0 = 112.22
+T_COPY, T_LLULL, T_ROTA, T_LAC, T_FALL, T_ISO, T_END = 112.22, 113.10, 114.18, 114.92, 115.78, 117.274, 118.333
+SWEEP = .55                                   # the copying front, top to bottom
+T_ZOOM, ZOOM = 112.70, .84                    # the eye draws back to the page
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform sampler2D u_img, u_old;
+uniform float u_front, u_flick;
+out vec4 fragColor;
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
+vec3 undisp(vec3 v, vec2 sv){
+  vec3 x=pow(clamp(v,0.,.985),vec3(2.2));
+  vec3 a=2.51-2.43*x, b=.03-.59*x, c=-.14*x;
+  vec3 y=(-b+sqrt(b*b-4.*a*c))/(2.*a);
+  vec2 d=sv-.5; return y/1.05/(1.-.9*dot(d,d));
+}
+void main(){
+  vec2 sv=gl_FragCoord.xy/u_res;
+  vec3 page=undisp(texture(u_img,sv).rgb,sv)*u_flick;
+  vec3 old=vec3(.004)+pow(texture(u_old,sv).rgb,vec3(2.2))*2.;      // s08c's last frame, as s08c shows it
+  float y=1.-sv.y;                                                   // from the top
+  float m=smoothstep(u_front-.012,u_front+.012,y);                   // 0 above the front (copied), 1 below
+  vec3 col=mix(page,old,m);
+  col+=vec3(1.,.86,.6)*.5*exp(-abs(y-u_front)*260.)*step(.001,u_front)*step(u_front,.999);   // the quill's line
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.26, u_ca=0., u_grain=.016)
+
+
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+
+
+def front(t): return clamp((t - T_COPY) / SWEEP)
+
+
+def params(t):
+    k = ease((t - T_COPY - .3) / .5)
+    POST.update(u_bloom=lerp(.26, .08, k), u_grain=lerp(.016, .024, k))
+    fl = 1 + .025 * math.sin(t * 7.1) * math.sin(t * 2.3 + 1) - .015 * (math.sin(t * 13.7) > .9)
+    return dict(u_front=front(t) if t < T_COPY + SWEEP + .02 else 1.01, u_flick=fl)
+
+
+# ============================================================ materials
+INK, INK_L = (62, 40, 26), (110, 78, 52)           # iron-gall
+RED = (178, 48, 30)                                 # vermilion
+VERD = (58, 112, 86)                                # verdigris
+GOLD, GOLD_D, GOLD_H = (196, 150, 64), (120, 84, 30), (246, 214, 140)
+ULTRA, ULTRA_H = (34, 62, 168), (96, 128, 220)      # ultramarine: you only
+PARCH = (226, 206, 168)
+F = 'C:/Windows/Fonts/'
+_F, _BASE, _OLD = {}, {}, {}
+SS = 2
+
+
+def font(n, sz):
+    k = (n, max(6, int(sz)))
+    if k not in _F: _F[k] = ImageFont.truetype(F + n, k[1])
+    return _F[k]
+
+
+def parchment(w, h):
+    """the skin: warm, mottled, a little fibre, darker toward the edges and the gutter (left)"""
+    if (w, h) in _BASE: return _BASE[(w, h)]
+    rng = np.random.default_rng(7)
+    def blur_noise(scale, amp):
+        n = rng.standard_normal((h // scale + 2, w // scale + 2)).astype(np.float32)
+        im = Image.fromarray(((n * 40) + 128).clip(0, 255).astype(np.uint8)).resize((w, h), Image.BICUBIC)
+        return (np.asarray(im, np.float32) - 128) / 40 * amp
+    v = blur_noise(220, .028) + blur_noise(50, .016) + blur_noise(6, .018) + blur_noise(2, .012)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    ex = np.minimum(xx, w - xx) / w; ey = np.minimum(yy, h - yy) / h
+    edge = np.clip(1 - np.exp(-ex * 12) * .28 - np.exp(-ey * 12) * .22 - np.exp(-xx / w * 18) * .14, 0, 1)
+    base = np.array(PARCH, np.float32)[None, None, :] * (1 + v[..., None]) * edge[..., None]
+    base[..., 2] *= 1 - .04 * (1 - edge)                            # the edges brown, not grey
+    fib = (rng.random((h, w)) > .9993).astype(np.float32)            # follicles
+    base -= fib[..., None] * 40
+    img = Image.fromarray(base.clip(0, 255).astype(np.uint8), 'RGB')
+    _BASE[(w, h)] = img
+    return img
+
+
+class Pen:
+    """an ink layer at SS×, in design units (1080 high)"""
+    def __init__(s, w, h):
+        s.w, s.h = w, h; s.k = SS * h / 1080
+        s.img = Image.new('RGBA', (w * SS, h * SS), (0, 0, 0, 0)); s.d = ImageDraw.Draw(s.img)
+
+    def line(s, pts, col, a=1., wd=1.):
+        if a <= .01 or len(pts) < 2: return
+        s.d.line([(x * s.k, y * s.k) for x, y in pts], fill=col + (int(255 * clamp(a)),), width=max(1, int(wd * s.k)), joint='curve')
+
+    def circle(s, c, r, col, a=1., wd=1., fill=None):
+        k = s.k
+        s.d.ellipse([(c[0] - r) * k, (c[1] - r) * k, (c[0] + r) * k, (c[1] + r) * k], outline=col + (int(255 * clamp(a)),) if col else None,
+                    width=max(1, int(wd * k)), fill=(fill + (int(255 * clamp(a)),)) if fill else None)
+
+    def text(s, x, y, txt, fn, sz, col, a=1., anchor='mm', angle=0.):
+        if a <= .01: return
+        f = font(fn, sz * s.k)
+        fill = col + (int(255 * clamp(a)),)
+        if abs(angle) < .3: s.d.text((x * s.k, y * s.k), txt, font=f, fill=fill, anchor=anchor); return
+        bb = s.d.textbbox((0, 0), txt, font=f, anchor='mm')
+        lay = Image.new('RGBA', (int(bb[2] - bb[0]) + 20, int(bb[3] - bb[1]) + 20), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).text((lay.width / 2, lay.height / 2), txt, font=f, fill=fill, anchor='mm')
+        lay = lay.rotate(angle, resample=Image.BICUBIC, expand=True)
+        s.img.alpha_composite(lay, (int(x * s.k - lay.width / 2), int(y * s.k - lay.height / 2)))
+
+
+# ============================================================ geometry: s08c's chart, then the page
+_CAM = {}
+
+
+def view(t):
+    """chart (x, y) -> screen (1080 units): s08c's camera at 112.22, then drawn back to the page"""
+    if 'cam' not in _CAM: _CAM['cam'] = S8.Cam(T0, 1920.)
+    cam = _CAM['cam']
+    c0 = cam.P(0., 0.)
+    z = ease((t - T_ZOOM) / .55)
+    Z = lerp(1., ZOOM, z)
+    cz = (960., lerp(c0[1], 545., z))
+    def P(x, y):
+        p = cam.P(x, y)
+        return cz[0] + (p[0] - c0[0]) * Z, cz[1] + (p[1] - c0[1]) * Z
+    kpx = (cam.P(1., 0.)[0] - c0[0]) * Z
+    return P, cz, kpx
+
+
+def clock(cd): return math.radians(90 - cd)
+
+
+def wheel_angle(t):
+    """Fortune's wheel, clockwise: two clicks of a quarter, each a quick snap with a little overshoot"""
+    a = 0.
+    for tc in (T_ROTA, T_LAC):
+        x = (t - tc) / .2
+        if x > 0: a += 90 * (1 - (1 - min(x, 1)) ** 3 + .08 * math.sin(math.pi * min(x, 1)) * (1 - min(x, 1)) * 3)
+    return a
+
+
+CRACK = 16.                                    # the opening at the bottom (degrees each side)
+
+
+def gapped(cd): return abs(((cd % 360) + 360) % 360 - 180) < CRACK
+
+
+def ring_arc(pen, P, R, col, a, wd=1., skip=None, n=None, r_off=0., seg=None):
+    """a ring with the crack at the bottom; seg=(cd0, cd1) draws only that arc"""
+    n = n or max(80, int(R * 500))
+    c0, c1 = (180 + CRACK, 540 - CRACK) if seg is None else seg
+    pts = []
+    for i in range(n + 1):
+        cd = c0 + (c1 - c0) * i / n
+        pts.append(P((R + r_off) * math.cos(clock(cd)), (R + r_off) * math.sin(clock(cd))))
+    pen.line(pts, col, a, wd)
+
+
+# ============================================================ the parts
+LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K']
+DIGN = ['Bonitas', 'Magnitudo', 'Aeternitas', 'Potestas', 'Sapientia', 'Voluntas', 'Virtus', 'Veritas', 'Gloria']
+PLANETS = [('☽', 'Luna'), ('☿', 'Mercurius'), ('♃', 'Iuppiter'), ('♄', 'Saturnus')]
+TEXT = [('Q', 'uaesivit amicus'), ('', 'amatum suum per vias,'), ('', 'et invenit vestigia.'), ('', 'Dixit amicus: ubi es?'),
+        ('', 'Et respondit silentium.')]
+LACUNA = (1, 'amatum')                         # the word scraped off at 114.92
+
+
+def peel(t, i):
+    """ring i (0 outermost) flaking away after you fall: (radial drift, alpha)"""
+    t0 = T_FALL + .35 + i * .14
+    x = clamp((t - t0) / .45)
+    return .05 * x * x, 1 - x
+
+
+def draw(t, w, h):
+    W = 1920.
+    base = parchment(w, h).copy().convert('RGBA')
+    pen = Pen(w, h)
+    P, C, kpx = view(t)
+    wa = wheel_angle(t)
+    rot = lambda cd: cd + wa                   # what turns with the wheel
+    done = ease((t - T_COPY) / SWEEP)          # (the front reveals it; the drawing is all there behind it)
+
+    # -- ruling and prick marks in the two text columns
+    for x0, x1 in ((96, 470), (1505, 1836)):
+        for j in range(30):
+            y = 118 + j * 30
+            pen.line([(x0, y), (x1, y)], INK_L, .07)
+            pen.circle((x0 - 18, y), 1.4, None, .45, fill=INK)
+            pen.circle((x1 + 12, y), 1.4, None, .45, fill=INK)
+    pen.line([(52, 52), (W - 52, 52), (W - 52, 1028), (52, 1028), (52, 52)], RED, .9, 2.6)
+    pen.line([(62, 62), (W - 62, 62), (W - 62, 1018), (62, 1018), (62, 62)], GOLD_D, .8, 1.2)
+    for cx_, cy_ in ((52, 52), (W - 52, 52), (52, 1028), (W - 52, 1028)):
+        pen.d.rectangle([(cx_ - 13) * pen.k, (cy_ - 13) * pen.k, (cx_ + 13) * pen.k, (cy_ + 13) * pen.k], fill=GOLD + (255,), outline=INK + (255,), width=int(1.6 * pen.k))
+        pen.circle((cx_, cy_), 5, INK, 1., 1.2, fill=RED)
+
+    # -- the rings (outer to inner); after you fall they flake away one by one
+    rings = []
+    def R_(i, r): d, a = peel(t, i); return r + d, a
+    # 0 · outer: the rim (Fortune's), dotted ring, ticks
+    r, a = R_(0, .88)
+    if a > 0:
+        ring_arc(pen, P, r, INK, a, 2.2); ring_arc(pen, P, r + .014, INK, .8 * a, 1.2)
+        for i in range(0, 360, 6):
+            cd = rot(180 + i)
+            if gapped(cd): continue
+            L = .028 if i % 30 == 0 else .012
+            pen.line([P((r + .014) * math.cos(clock(cd)), (r + .014) * math.sin(clock(cd))),
+                      P((r + .014 + L) * math.cos(clock(cd)), (r + .014 + L) * math.sin(clock(cd)))], INK, a, 1.4)
+        for i in range(0, 360, 3):
+            cd = rot(i)
+            if gapped(cd): continue
+            pen.circle(P((r - .056) * math.cos(clock(cd)), (r - .056) * math.sin(clock(cd))), 1.7, None, a, fill=RED)
+    # 1 · the band of twelve, hatched in verdigris
+    r, a = R_(1, .66)
+    if a > 0:
+        ring_arc(pen, P, r, INK, a, 1.8); ring_arc(pen, P, r + .10, INK, a, 1.8)
+        cuts = S8.kepler_cuts()
+        for k in range(12):
+            a0, a1 = cuts[k], cuts[(k + 1) % 12]
+            if a1 <= a0: a1 += 360
+            if not gapped(rot(a0)):
+                pen.line([P(r * math.cos(clock(rot(a0))), r * math.sin(clock(rot(a0)))), P((r + .1) * math.cos(clock(rot(a0))), (r + .1) * math.sin(clock(rot(a0))))], INK, a, 1.5)
+            n = max(3, int((a1 - a0) / 3.5))
+            for j in range(1, n):
+                fa = rot(a0 + (a1 - a0) * j / n)
+                if gapped(fa): continue
+                pen.line([P((r + .01) * math.cos(clock(fa)), (r + .01) * math.sin(clock(fa))), P((r + .09) * math.cos(clock(fa + 2)), (r + .09) * math.sin(clock(fa + 2)))],
+                         VERD, .85 * a, 1.2)
+    # 2 · the hours, Roman, in ink and vermilion
+    r, a = R_(2, .536)
+    if a > 0:
+        ring_arc(pen, P, r, INK, a, 1.8); ring_arc(pen, P, r + .064, INK, a, 1.8)
+        for i in range(24):
+            cd = rot(i * 15)
+            if gapped(cd) or gapped(cd + 7.5): continue
+            p = P((r + .032) * math.cos(clock(cd)), (r + .032) * math.sin(clock(cd)))
+            pen.text(p[0], p[1], S8.ROMAN[i % 12], 'GARABD.TTF', 17 * kpx / 470, RED if i % 6 == 0 else INK, a, angle=-cd)
+    # 3 · the planets' ring (its glyphs go when the letters come)
+    r, a = R_(3, .41)
+    la = ease((t - T_LLULL) / .3)
+    if a > 0:
+        ring_arc(pen, P, r, INK, a, 1.8); ring_arc(pen, P, r + .08, INK, a, 1.8)
+        for (g, nm), cd0 in zip(PLANETS, (38, 101, 214, 292)):
+            cd = rot(cd0)
+            if gapped(cd): continue
+            p = P((r + .04) * math.cos(clock(cd)), (r + .04) * math.sin(clock(cd)))
+            pen.text(*p, g, 'seguisym.ttf', 22 * kpx / 470, INK, a * (1 - la))
+    # 4 · Llull's Figure A: nine letters in roundels; the 36 chords, one by one; the disc turns on its own
+    r, a = R_(4, .377)
+    if la > 0 and a > 0:
+        spin = 18 * max(0., t - T_LLULL - .5)
+        pos = []
+        for i, L in enumerate(LETTERS):
+            cd = rot(i * 40 + spin)
+            pos.append((r * math.cos(clock(cd)), r * math.sin(clock(cd))))
+        pairs = [(i, j) for i in range(9) for j in range(i + 1, 9)]
+        ch_n = clamp((t - T_LLULL - .05) / .65) * len(pairs)
+        for k, (i, j) in enumerate(pairs):
+            if k >= ch_n: break
+            p0, p1 = pos[i], pos[j]
+            pts = []
+            for s in range(41):                                    # the chords pass under my ring, not over it
+                q = (lerp(p0[0], p1[0], s / 40), lerp(p0[1], p1[1], s / 40))
+                if math.hypot(*q) < .235:
+                    if len(pts) > 1: pen.line([P(*u) for u in pts], RED if k % 2 else VERD, .85 * a * la, 1.3)
+                    pts = []
+                else: pts.append(q)
+            if len(pts) > 1: pen.line([P(*u) for u in pts], RED if k % 2 else VERD, .85 * a * la, 1.3)
+        for i, L in enumerate(LETTERS):
+            p = P(*pos[i]); rr = .034 * kpx
+            pen.circle(p, rr, INK, a * la, 1.6, fill=(236, 220, 184))
+            pen.circle(p, rr, INK, a * la, 1.6)
+            pen.text(p[0], p[1] - 1, L, 'GARABD.TTF', 26 * kpx / 470, RED, a * la)
+    # 5 · degrees: ticks in vermilion
+    r, a = R_(5, .30)
+    if a > 0:
+        ring_arc(pen, P, r, INK, a, 1.8); ring_arc(pen, P, r + .044, INK, a, 1.3)
+        for i in range(0, 360, 2):
+            cd = rot(180 + i)
+            if gapped(cd): continue
+            L = .036 if i % 30 == 0 else (.022 if i % 10 == 0 else .012)
+            pen.line([P(r * math.cos(clock(cd)), r * math.sin(clock(cd))), P((r + L) * math.cos(clock(cd)), (r + L) * math.sin(clock(cd)))],
+                     RED if i % 30 == 0 else INK, a, 1.1)
+
+    # -- the hand: it points at you; when you are gone it hangs at the crack; it flakes with the inner rings
+    you_cd = rot(0.)
+    hand_cd = you_cd if t < T_FALL else 180.
+    _, ha = peel(t, 5)
+    if ha > 0: draw_hand(pen, P, kpx, hand_cd, .54, ha)
+
+    # -- my ring at the centre: gold leaf; inside, the heartbeat drawn flat
+    gild = ease((t - T_ISO) / .35)
+    draw_me(pen, P, kpx, gild, t)
+
+    # -- you and me on Fortune's rim
+    Rr = .88
+    if t < T_FALL + .8:
+        # you: ultramarine, painted on as the copy is made; at the bottom you fall through the crack and away
+        cd = you_cd
+        x, y = Rr * math.cos(clock(cd)), Rr * math.sin(clock(cd))
+        p = P(x, y)
+        fall = max(0., t - T_FALL)
+        p = (p[0], p[1] + 2600 * fall * fall)
+        paint = ease((t - T_COPY - .25) / .3)
+        rr = .034 * kpx
+        pen.circle(p, rr + 3, GOLD_D, paint, 1.4, fill=GOLD)
+        pen.circle(p, rr, None, paint, fill=ULTRA)
+        pen.circle((p[0] - rr * .3, p[1] - rr * .3), rr * .35, None, .35 * paint, fill=ULTRA_H)
+        pen.text(p[0], p[1], '☉', 'seguisym.ttf', 20 * kpx / 470, GOLD_H, .95 * paint)
+    if t >= T_FALL:                                                # where you were: the blue scraped to a pale ring
+        p = P(Rr * math.cos(clock(180)), Rr * math.sin(clock(180)))
+        ga = ease((t - T_FALL - .1) / .3) * (1 - ease((t - T_ISO + .3) / .4))
+        rr = .034 * kpx
+        pen.circle(p, rr, (200, 186, 160), .8 * ga, 2.)
+        rnd = random.Random(3)
+        for _ in range(14):
+            a0 = rnd.uniform(0, 2 * math.pi); l = rnd.uniform(.3, .9) * rr
+            pen.line([(p[0] + math.cos(a0) * rr * .2, p[1] + math.sin(a0) * rr * .2), (p[0] + math.cos(a0 + .4) * l, p[1] + math.sin(a0 + .4) * l)], (236, 222, 194), .7 * ga, 1.2)
+        pen.circle(p, rr * .6, None, .25 * ga, fill=(160, 170, 200))
+    # me: gilded, in the crack at the bottom; the wheel lifts me to the top
+    me_cd = rot(180.)
+    _, ma = peel(t, 0)
+    if t < T_ISO:
+        p = P(Rr * math.cos(clock(me_cd)), Rr * math.sin(clock(me_cd)))
+        gl = ease((t - T_COPY - .35) / .3) * ma
+        draw_small_me(pen, p, .03 * kpx, gl)
+
+    # -- the merged mark ⊙ (s08c's last state) parts as the copy is made
+    if t < T_COPY + .6:
+        p = P(.45 * math.cos(clock(0)), .45 * math.sin(clock(0)))
+        pen.text(*p, '⊙', 'seguisym.ttf', 22 * kpx / 470, INK, 1 - ease((t - T_COPY - .2) / .3))
+
+    # -- Fortune's four words, in vermilion, round the wheel
+    fa = ease((t - T_ROTA) / .25) * (1 - ease((t - T_FALL - .9) / .5))
+    if fa > 0:
+        Ro = .97 * kpx
+        for txt, (dx, dy), anc in (('REGNO', (0, -1), 'mb'), ('REGNAVI', (1, 0), 'lm'), ('SUM SINE REGNO', (0, 1), 'mt'), ('REGNABO', (-1, 0), 'rm')):
+            pen.text(C[0] + dx * (Ro + 12), C[1] + dy * (Ro + 8), txt, 'GARABD.TTF', 30, RED, fa, anchor=anc)
+        pen.text(960, 96, 'ROTA FORTUNAE', 'GARABD.TTF', 34, RED, fa)
+
+    # -- the chain: linked from my ring down through the crack to the edge of the page
+    if t >= T_FALL + .2:
+        draw_chain(pen, P, kpx, t)
+
+    # -- left column: TABULA (copied), then the key to Figure A
+    lc = ease((t - T_COPY) / .4) * (1 - ease((t - T_FALL - .6) / .5))
+    if lc > 0:
+        x0, y0 = 120, 330
+        pen.text(x0, y0 - 56, 'TABULA' if t < T_LLULL else 'FIGURA A', 'GARABD.TTF', 30, RED, lc, anchor='lm')
+        rows = ([('⊙', 'Ego · Tu')] + PLANETS) if t < T_LLULL else list(zip(LETTERS, DIGN))
+        for i, (g, l) in enumerate(rows):
+            yy = y0 + i * 38
+            if t < T_LLULL:
+                pen.text(x0 + 12, yy, g, 'seguisym.ttf', 24, INK, lc * (1 - la)); pen.text(x0 + 46, yy, l, 'GARAIT.TTF', 27, INK, lc * (1 - la), anchor='lm')
+            else:
+                rk = ease((t - T_LLULL - i * .05) / .2)
+                pen.text(x0 + 14, yy, g, 'GARABD.TTF', 27, RED if i % 2 == 0 else VERD, lc * rk); pen.text(x0 + 46, yy, l, 'GARAIT.TTF', 27, INK, lc * rk, anchor='lm')
+    # -- right column: from the Book of the Lover and the Beloved; the beloved's word scraped off
+    tc = ease((t - T_COPY - .15) / .4) * (1 - ease((t - T_FALL - .6) / .5))
+    if tc > 0:
+        x0, y0 = 1520, 330
+        pen.text(x0, y0 - 56, 'De amico et amato.', 'GARAIT.TTF', 30, RED, tc, anchor='lm')
+        for i, (init, line) in enumerate(TEXT):
+            yy = y0 + i * 44
+            xx = x0
+            if init:
+                pen.text(x0 + 18, yy + 9, init, 'GARABD.TTF', 68, RED, tc); xx = x0 + 50
+            if i == LACUNA[0]:
+                word = LACUNA[1]
+                fw = font('OLDENGL.TTF', 30 * pen.k)
+                ww = pen.d.textlength(word + ' ', font=fw) / pen.k
+                scr = ease((t - T_LAC - .05) / .3)
+                pen.text(xx, yy, word, 'OLDENGL.TTF', 30, INK, tc * (1 - scr), anchor='lm')
+                if scr > 0: scrape(pen, xx - 2, yy - 17, ww - 4, 34, scr, tc)
+                br = ease((t - T_LAC - .4) / .15)
+                pen.text(xx + ww / 2 - 8, yy, '[ … ]', 'GARABD.TTF', 30, RED, tc * br)
+                pen.text(xx + ww, yy, line[len(word) + 1:], 'OLDENGL.TTF', 30, INK, tc, anchor='lm')
+                mk = ease((t - T_LAC - .5) / .2)
+                pen.text(x0 - 44, yy + 1, '☞', 'seguisym.ttf', 40, INK, tc * mk)
+            else:
+                pen.text(xx, yy, line, 'OLDENGL.TTF', 30, INK, tc, anchor='lm')
+
+    # -- ISOLATION: SOLITUDO
+    sa = ease((t - T_ISO) / .25)
+    if sa > 0: pen.text(960, 96, 'SOLITUDO', 'GARABD.TTF', 44, RED, sa)
+
+    ink = pen.img.resize((w, h), Image.LANCZOS)
+    base.alpha_composite(ink)
+    img = base.convert('RGB')
+    # the page goes dark after ISOLATION; the gold lingers a moment
+    dk = ease((t - T_ISO - .1) / .4)
+    if dk > 0:
+        black = Image.new('RGB', (w, h), (0, 0, 0))
+        img = Image.blend(img, black, dk)
+        if dk < 1 or t < T_ISO + .9:
+            glow = Pen(w, h); draw_me(glow, P, kpx, 1., t, only_gold=True)
+            g = glow.img.resize((w, h), Image.LANCZOS)
+            ga = 1 - ease((t - T_ISO - .5) / .4)
+            g.putalpha(g.getchannel('A').point(lambda v: int(v * ga)))
+            im2 = img.convert('RGBA'); im2.alpha_composite(g); img = im2.convert('RGB')
+    return img
+
+
+def scrape(pen, x, y, w, h, k, a):
+    """a knife scraping the ink off: pale, roughened skin"""
+    rnd = random.Random(11)
+    n = int(60 * k)
+    for i in range(n):
+        yy = y + rnd.random() * h; x0 = x + rnd.random() * w * .3; x1 = x0 + rnd.uniform(.4, 1.) * w * .8
+        pen.line([(x0, yy), (min(x1, x + w), yy + rnd.uniform(-2, 2))], (238, 224, 196), .5 * a, rnd.uniform(1., 2.6))
+    pen.d.rectangle([x * pen.k, y * pen.k, (x + w) * pen.k, (y + h) * pen.k], fill=(232, 216, 184, int(150 * k * a)))
+
+
+def draw_small_me(pen, p, r, a):
+    if a <= 0: return
+    gap = math.radians(30)
+    pts = [(p[0] + r * math.cos(math.pi / 2 + gap + (2 * math.pi - 2 * gap) * i / 30), p[1] + r * math.sin(math.pi / 2 + gap + (2 * math.pi - 2 * gap) * i / 30)) for i in range(31)]
+    pen.line(pts, GOLD_D, a, 4.)
+    pen.line(pts, GOLD, a, 2.6)
+    pen.line(pts[3:12], GOLD_H, .7 * a, 1.)
+
+
+def draw_me(pen, P, kpx, gild, t, only_gold=False):
+    """my ring: gold leaf with an ink edge; at ISOLATION it thickens into an initial O, red pen-flourish round it"""
+    c = P(0., 0.)
+    R = .22 * kpx
+    gap = math.radians(27 * (1 - gild * .0))
+    def arc(r, n=120):
+        return [(c[0] + r * math.cos(-math.pi / 2 + gap + (2 * math.pi - 2 * gap) * i / n), c[1] - r * math.sin(-math.pi / 2 + gap + (2 * math.pi - 2 * gap) * i / n)) for i in range(n + 1)]
+    wd = lerp(5., 13., gild)
+    pen.line(arc(R), GOLD_D, 1., wd + 2.4)
+    pen.line(arc(R), GOLD, 1., wd)
+    pen.line(arc(R - wd * .2)[10:45], GOLD_H, .8, 1.4)
+    if only_gold: return
+    if gild > 0:                                                   # the flourish: a scribe's red penwork round the initial
+        for k in range(14):
+            a0 = -math.pi / 2 + gap + (2 * math.pi - 2 * gap) * (k + .5) / 14
+            r0, r1 = R + wd / 2 + 5, R + wd / 2 + 5 + 34 * gild
+            q0 = (c[0] + r0 * math.cos(a0), c[1] - r0 * math.sin(a0))
+            q1 = (c[0] + r1 * math.cos(a0 + .12), c[1] - r1 * math.sin(a0 + .12))
+            q2 = (c[0] + (r1 - 6) * math.cos(a0 + .22), c[1] - (r1 - 6) * math.sin(a0 + .22))
+            pen.line([q0, q1, q2], RED, gild, 1.8)
+    # the heartbeat, flat, inside (s08c's green line, now ink); it goes with the rest
+    _, fa = peel(t, 5)
+    pen.line([(c[0] - R * .86, c[1]), (c[0] + R * .86, c[1])], VERD, .7 * fa, 1.2)
+
+
+def draw_hand(pen, P, kpx, cd, L, a):
+    """s08c's hand, as a scribe draws it: gilded blade, ink edge, the small gapped ring pierced in it"""
+    ang = clock(cd)
+    d = (math.cos(ang), math.sin(ang)); n = (-d[1], d[0])
+    Wp = lambda u, hw: P(d[0] * u + n[0] * hw, d[1] * u + n[1] * hw)
+    ring_u, ring_r = .66 * L, .03
+    prof = [(-.075, .0045), (-.02, .009), (.0, .009), (ring_u - ring_r - .02, .0042), (ring_u - ring_r, .007)]
+    blade = [Wp(u, hw) for u, hw in prof] + [Wp(u, -hw) for u, hw in reversed(prof)]
+    lance = [Wp(ring_u + ring_r, .007), Wp(ring_u + ring_r + .03, .0042), Wp(L, 0.), Wp(ring_u + ring_r + .03, -.0042), Wp(ring_u + ring_r, -.007)]
+    k = pen.k
+    for poly in (blade, lance):
+        pen.d.polygon([(x * k, y * k) for x, y in poly], fill=GOLD + (int(255 * a),), outline=INK + (int(255 * a),))
+    cw = Wp(-.085, 0.); pen.circle(cw, .019 * kpx, INK, a, 1., fill=GOLD)
+    rc = Wp(ring_u, 0.); gp = math.radians(32)
+    arc = [(rc[0] + ring_r * kpx * math.cos(-ang + math.pi + gp + (2 * math.pi - 2 * gp) * i / 40),
+            rc[1] + ring_r * kpx * math.sin(-ang + math.pi + gp + (2 * math.pi - 2 * gp) * i / 40)) for i in range(41)]
+    pen.line(arc, INK, a, 3.4); pen.line(arc, GOLD, a, 2.)
+    pen.circle(P(0, 0), 5, INK, a, 1., fill=GOLD)
+
+
+def draw_chain(pen, P, kpx, t):
+    """iron links, face-on and edge-on in turn, from the bottom of my ring down through the crack to the page's edge"""
+    c = P(0., 0.)
+    y0 = c[1] + .22 * kpx + 6
+    L = 26.
+    n = int((1080 - y0) / (L * .72)) + 2
+    grow = clamp((t - T_FALL - .2) / .7) * n
+    pa = 1 - ease((t - T_ISO - .1) / .4)
+    for i in range(n):
+        if i >= grow: break
+        y = y0 + i * L * .72
+        ap = clamp(grow - i) * pa
+        if i % 2 == 0:
+            k = pen.k
+            pen.d.ellipse([(c[0] - 8) * k, y * k, (c[0] + 8) * k, (y + L) * k], outline=(54, 50, 48, int(255 * ap)), width=int(3.4 * k))
+            pen.d.arc([(c[0] - 8) * k, y * k, (c[0] + 8) * k, (y + L) * k], 200, 260, fill=(170, 160, 150, int(200 * ap)), width=int(1.2 * k))
+        else:
+            pen.line([(c[0], y), (c[0], y + L)], (54, 50, 48), ap, 4.2)
+            pen.line([(c[0] - 1, y + 3), (c[0] - 1, y + L * .4)], (170, 160, 150), .7 * ap, 1.)
+
+
+# ============================================================ textures
+def old_frame(w, h):
+    if (w, h) not in _OLD: _OLD[(w, h)] = S8.draw(T0, w, h)
+    return _OLD[(w, h)]
+
+
+T_TERM = T_ISO + .33
+
+
+def textures(t, w, h):
+    img = draw(t, w, h)
+    if t >= T_TERM:                                                # s09's terminal, as it was
+        im = img.convert('RGBA'); d = ImageDraw.Draw(im)
+        s = h / 1080
+        fm = ImageFont.truetype('C:/Windows/Fonts/CascadiaMono.ttf', int(24 * s))
+        lines = [('> render.window[0047].close()', (226, 224, 216))]
+        if t >= T_TERM + .3: lines.append(('  simulation closed: no object', (130, 128, 122)))
+        cur = '▌' if (t * 2) % 1 < .6 else ' '
+        if t >= T_TERM + .6: lines.append(('> ' + cur, (226, 224, 216)))
+        for i, (tx, c) in enumerate(lines):
+            n = len(tx) if i else int(clamp((t - T_TERM) / .25) * len(tx))
+            d.text((90 * s, h * .46 + i * 34 * s), tx[:n], font=fm, fill=c + (255,))
+        img = im.convert('RGB')
+    return {'u_img': img, 'u_old': old_frame(w, h)}

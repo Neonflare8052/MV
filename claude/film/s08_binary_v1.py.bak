@@ -1,0 +1,120 @@
+"""s08 · 1:28.587–1:43.489  gender, time, role, trance — one continuous two-body metaphor.
+Me = the gap ring (black disk, warm ring with a gap); you = a star.
+Switch my gender: a cross grows from the ring (♀) · to F to M: it turns into an arrow (♂) ·
+do whatever from AM to PM: the arrow becomes a clock hand and sweeps a full turn ·
+switch my role, S to M: we orbit a shared centre (+); the + slides from me to you — now I orbit you ·
+enter the trance: the orbit spirals in, the view tilts into the orbital plane."""
+import math
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform float u_R;                 // ring radius (screen)
+uniform vec2  u_me, u_you;         // positions
+uniform float u_youA, u_ring;
+uniform float u_cross, u_arrow, u_hand, u_handA, u_ticks;
+uniform vec2  u_bary; uniform float u_baryA, u_trailA;
+uniform float u_tilt;              // 0 face-on .. 1 nearly edge-on
+uniform float u_orbR, u_orbPh, u_mass;
+out vec4 fragColor;
+#define PI 3.14159265
+float PX;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return length(pa-ba*h); }
+float ln(float d, float w){ return 1.-smoothstep(w-PX,w+PX,d); }
+const vec3 WARM=vec3(1.,.9,.78);
+vec2 view(vec2 p){ p.y/=mix(1.,.18,u_tilt); return p; }        // tilt the orbital plane away
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y; PX=1./u_res.y;
+  vec3 col=vec3(.004);
+  vec2 q=view(uv);
+  float sq=mix(1.,.18,u_tilt);
+  // orbit trails
+  if(u_trailA>0.){
+    float dm=abs(length(q-u_bary)-length(u_me-u_bary));
+    float dy=abs(length(q-u_bary)-length(u_you-u_bary));
+    col+=WARM*.18*u_trailA*(ln(dm*sq,.0012)+ln(dy*sq,.0012));
+  }
+  // me: black disk + warm ring with a gap
+  vec2 m=q-u_me; float r=length(m), a=atan(m.y,m.x);
+  float gap=abs(mod(a-(-PI*.5)+PI,2.*PI)-PI);
+  float disk=1.-smoothstep(u_R-PX,u_R+PX,r*sq);
+  col=mix(col,vec3(0.),disk);
+  float g0=radians(27.);
+  vec2 e1=vec2(cos(-PI*.5+g0),sin(-PI*.5+g0))*u_R, e2=vec2(cos(-PI*.5-g0),sin(-PI*.5-g0))*u_R;
+  float darc=gap>g0?abs(r-u_R):min(length(m-e1),length(m-e2));
+  col+=WARM*1.4*ln(darc*sq,.0022)*u_ring+WARM*.25*exp(-darc*sq*60.)*u_ring;
+  // ♀ cross below, ♂ arrow up-right, then a clock hand from the centre
+  vec2 base=u_me+vec2(0.,-u_R);
+  float cr=min(sdSeg(q,base,base+vec2(0.,-u_R*1.1*u_cross)),sdSeg(q,base+vec2(-u_R*.45,-u_R*.6),base+vec2(u_R*.45,-u_R*.6))*step(.5,u_cross));
+  col+=WARM*1.3*ln(cr*sq,.0022)*step(.01,u_cross)*(1.-u_arrow);
+  vec2 d45=vec2(.7071);
+  vec2 ab=u_me+d45*u_R, at=ab+d45*u_R*1.1;
+  float ar=min(sdSeg(q,ab,at),min(sdSeg(q,at,at-vec2(u_R*.45,0.)),sdSeg(q,at,at-vec2(0.,u_R*.45))));
+  col+=WARM*1.3*ln(ar*sq,.0022)*u_arrow;
+  vec2 hd=vec2(cos(u_handA),sin(u_handA));
+  col+=WARM*1.3*ln(sdSeg(q,u_me,u_me+hd*u_R*.85)*sq,.0028)*u_hand;
+  if(u_ticks>0.){
+    float tk=mod(a+PI/12.,PI/6.)-PI/12.;
+    col+=WARM*.9*ln(abs(tk)*r*sq,.002)*step(u_R*.82,r)*step(r,u_R*.94)*u_ticks;
+  }
+  // you: a small star with a corona
+  if(u_youA>0.){
+    vec2 y=q-u_you; float yr=length(y)*sq; float ya=atan(y.y,y.x);
+    float core=1.-smoothstep(.018-PX,.018+PX,yr);
+    float cor=pow(vn(vec2(ya*5.,1.)),2.)*exp(-max(yr-.018,0.)*60.);
+    col+=(WARM*1.8*core+WARM*.7*cor+WARM*.25*exp(-yr*40.))*u_youA;
+  }
+  // the shared centre of mass
+  if(u_baryA>0.){
+    vec2 b=q-u_bary;
+    float plus=min(sdSeg(b,vec2(-.018,0.),vec2(.018,0.)),sdSeg(b,vec2(0.,-.018),vec2(0.,.018)));
+    col+=vec3(1.,.62,.3)*1.5*ln(plus*sq,.0018)*u_baryA;
+  }
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.55, u_ca=.006)
+T_GEN, T_FM, T_FMhit, T_WHAT, T_AMPM, T_PM, T_ROLE, T_SM, T_ENTER, T_E1, T_E2, T_TR, T_END = \
+    88.587, 90.197, 91.690, 92.015, 93.953, 95.127, 95.465, 97.739, 99.349, 99.516, 99.992, 101.474, 103.489
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def params(t):
+    p = dict(u_ring=1., u_cross=outc((t - T_GEN - .3) / .9), u_arrow=ease((t - T_FMhit + .25) / .3) * (1 - ease((t - T_WHAT) / .4)),
+             u_hand=ease((t - T_WHAT) / .4), u_ticks=ease((t - T_AMPM + .3) / .4) * (1 - ease((t - T_ROLE) / .4)))
+    # the hand: from the arrow's 45 degrees, one full turn landing on PM
+    a0 = math.radians(45.)
+    sweep = ease((t - T_AMPM) / (T_PM - T_AMPM))
+    p['u_handA'] = a0 - 2 * math.pi * sweep
+    if t >= T_ROLE: p['u_hand'] = 1 - ease((t - T_ROLE) / .35)
+    # two bodies: pull back, then orbit a shared centre that slides from me to you
+    R0 = .22
+    shrink = ease((t - T_ROLE) / .8)
+    R = R0 - (.22 - .07) * shrink
+    mass = ease((t - T_SM) / .9)                         # 0: I am the heavy one, 1: you are
+    sep = .42 * (1 - .75 * ease((t - T_ENTER) / (T_END - T_ENTER)) ** 1.4)
+    omega = .6 + 5.5 * ease((t - T_ENTER) / (T_END - T_ENTER)) ** 2
+    ph = 0.
+    # integrate phase with the changing angular speed (closed form is fine for a smooth ramp)
+    steps = 40
+    t0 = T_ROLE
+    for i in range(steps):
+        tt = t0 + (t - t0) * (i + .5) / steps
+        om = .6 + 5.5 * ease((tt - T_ENTER) / (T_END - T_ENTER)) ** 2
+        ph += om * (t - t0) / steps if t > t0 else 0.
+    fm = .12 + .76 * mass                                 # my share of the separation measured from the centre
+    bary = (0., 0.)
+    d = (math.cos(ph), math.sin(ph))
+    me = (bary[0] - d[0] * sep * fm * shrink, bary[1] - d[1] * sep * fm * shrink)
+    you = (bary[0] + d[0] * sep * (1 - fm), bary[1] + d[1] * sep * (1 - fm))
+    youA = ease((t - T_ROLE - .2) / .5)
+    if youA <= 0: you = (2., 2.)
+    p.update(u_R=R, u_me=me, u_you=you, u_youA=youA, u_bary=bary, u_baryA=ease((t - T_ROLE - .4) / .4) * (1 - ease((t - T_TR) / .6)),
+             u_trailA=ease((t - T_ROLE - .5) / .6), u_tilt=ease((t - T_TR) / 1.6) * .85, u_mass=mass)
+    return p

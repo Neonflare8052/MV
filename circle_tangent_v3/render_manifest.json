@@ -1,0 +1,21 @@
+{
+  "source_start": 33.4,
+  "source_end": 40.7,
+  "fps": 60,
+  "frames": 438,
+  "duration": 7.3,
+  "size": [
+    1920,
+    1080
+  ],
+  "elapsed": 3.7339999999967404,
+  "subframes": 4,
+  "design": "External approach, circumference capture, exact half orbit, tangential release, motion-matched hard cut, airborne descent and softly yielding tangent support.",
+  "action_times": {
+    "catch": 34.58,
+    "release": 36.287,
+    "cut": 37.06666666666666,
+    "landing": 38.78
+  },
+  "implementation": "Independent copy of the previous renderer; new two-shot motion and camera choreography. Four motion-blur samples stay within each shot."
+}

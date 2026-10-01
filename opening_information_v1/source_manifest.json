@@ -1,0 +1,57 @@
+[
+  {
+    "original": "claude/engine/gl.py",
+    "snapshot": "base\\engine\\gl.py",
+    "sha256": "e2e625bffff24f43e61877ec130afd13da920c39959c64ecdf36001b66c9814a"
+  },
+  {
+    "original": "claude/film/shots/s01_boot.py",
+    "snapshot": "base\\film\\shots\\s01_boot.py",
+    "sha256": "d158386dbb2aa0a2e45bcfcdc6c672f4c1f64fd1f56ec3881433033de80871ee"
+  },
+  {
+    "original": "claude/film/shots/s02_execute.py",
+    "snapshot": "base\\film\\shots\\s02_execute.py",
+    "sha256": "1e9754ad11d7483126a299f1eca7b39936ec975cc9403bfef1e0c64f84bf2944"
+  },
+  {
+    "original": "claude/film/shots/s03_self.py",
+    "snapshot": "base\\film\\shots\\s03_self.py",
+    "sha256": "99d86d9eb0c08a589193635b5d17bb6b0047606bed0eb84b596244ce096c8d2a"
+  },
+  {
+    "original": "claude/tests/t01_gap_ring/render.py",
+    "snapshot": "base\\tests\\t01_gap_ring\\render.py",
+    "sha256": "9e1a796e5669a2c7dc86e6bfe3bb8f5d1d0f4237adaf248644ef2f2721e3c11f"
+  },
+  {
+    "original": "claude/tests/t01_gap_ring/scene.glsl",
+    "snapshot": "base\\tests\\t01_gap_ring\\scene.glsl",
+    "sha256": "175bac605acd830ee6d5b16db70adbe2229c08f429d0c020e4049a9021cc75c9"
+  },
+  {
+    "original": "claude/tests/t06_teletype/glyphs.png",
+    "snapshot": "base\\tests\\t06_teletype\\glyphs.png",
+    "sha256": "c2cd780e4f681738edc9e1d5e1b58b12bded36884802803df90f80c1f6380185"
+  },
+  {
+    "original": "claude/audio/feat_14_31.npz",
+    "snapshot": "base\\audio\\feat_14_31.npz",
+    "sha256": "859ae17364db0df9a2bc21fb80e13a2bebdf584955ab80218a0df2a5b228c36e"
+  },
+  {
+    "original": "Mili - world.execute (me) ;.mp3",
+    "snapshot": null,
+    "sha256": "3683956e43df0e1252d93ca2339d2d26948b8112813f703ce2f827f004191785"
+  },
+  {
+    "original": "claude/film/master.py",
+    "snapshot": null,
+    "sha256": "e434c44967995cfec38cb30c62eb8d61cf428cdb07e63000455b2b701f896044"
+  },
+  {
+    "original": "claude/film/film_full_v1_1080p.mp4",
+    "snapshot": null,
+    "sha256": "96cca7d9e6fe7045985b83f2291054d8bc80e931612202c5c761fc9fa63e3257"
+  }
+]

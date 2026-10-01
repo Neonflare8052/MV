@@ -1,0 +1,760 @@
+"""s08c · 1:28.587–1:52.22  the star chart of two bodies.  One system drives everything: the rings are its instruments.
+(replaces s08, and s09 up to its second cut; s09 keeps the flashbacks from 1:52.22.)  Flat, classical, no gears.
+
+The model: me (the gap ring) and you (a star, ☉) on a Kepler orbit; later a pair round a shared centre, spiralling in.
+  planet ring   your longitude (☉ marker, a leader to you); my glyph sits in the slot under my gap: ♀, then ♂
+  degree ring   the longitudes you have passed light up and stay lit — the evidence, accumulating
+  band of 12    equal times of your orbit (Kepler's second law): unequal sectors, each filled as you sweep it
+  hours + hand  the hand is the line from me to you; AM→PM is you going half round, perigee to apogee
+  orbit         the eccentric circle is your actual orbit, me at its focus
+  outer ring    the detector: waves reach it last; two marks on it (ME, YOU) write the strip below
+  lattice       spacetime: lit on the side facing you (a day passing), copper where masses press it
+  waves         two-armed crests leave the pair at a finite speed; every ring deforms when a crest reaches it
+1:28.587 Switch my gender     the gathered sky (t02) closes into my ring; rings grow outward on the beats; ♀ from the gap
+1:30.197 To F to M            ♂; the slot turns (1:31.690)
+1:32.015 do whatever          the arrow swings round to point at you: it is the hand
+1:33.953 From AM to PM        you run from perigee to apogee; at 1:35.127 you are at the top and every mark is in line
+1:35.465 switch my role       we both move, round a centre (+); S to M: the centre slides into you
+1:39.349 enter the trance     the orbit shrinks, precesses (a rosette), waves start; the eye sinks into the plane
+1:43.489 If I can             it stands up again; the chirp: the crests come faster and harder
+1:46.293 VIBRATIONS           the merger: one flash, the rings knocked off centre; the two marks become one
+1:47.22 … 1:50.221            heartbeats: each sends one round crest out; as it passes a ring the ring comes home; the hand
+                              steps one hour a beat; COMPLETION: the gap closes, everything in line, round, still
+1:50.900 Though you have left the heartbeat goes flat; every ring cracks open at the bottom"""
+import math, random
+from PIL import Image, ImageDraw, ImageFont
+
+T_GEN, T_FM, T_FMHIT, T_WHAT, T_AM, T_PM, T_ROLE, T_SM, T_ENTER, T_TR = 88.587, 90.197, 91.690, 92.015, 93.953, 95.127, 95.465, 97.739, 99.349, 101.474
+T_IF, T_FEEL, T_VIB, T_THEN, T_FIN, T_COMP, T_LEFT, T_OUT = 103.489, 104.197, 106.293, 107.220, 107.903, 110.221, 110.900, 112.220
+BEAT0, BEAT = 162.76, .4635
+BEATS_GROW = [BEAT0 + k * BEAT for k in range(-160, -155)]          # 88.60 … 90.46: the rings, one a beat
+HEART = [107.14 + i * .927 for i in range(4)]                       # heartbeats (every other beat)
+CREST_C = 1.5                                                       # how fast waves travel (world units / s)
+POST = dict(u_bloom=.4, u_ca=0., u_grain=.02)
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform sampler2D u_img;
+out vec4 fragColor;
+void main(){
+  vec4 c=texture(u_img,gl_FragCoord.xy/u_res);
+  fragColor=vec4((vec3(.004)+pow(c.rgb,vec3(2.2))*2.)*u_weight,1.);
+}
+'''
+
+
+def params(t): return {}
+
+
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+
+
+# ============================================================ the system
+def mean_motion(t):
+    if t < T_AM: return .8
+    if t < T_PM: return math.pi / (T_PM - T_AM)                     # half an orbit, perigee to apogee, exactly
+    if t < T_ROLE: return .9
+    if t < T_ENTER: return lerp(.9, 1.3, ease((t - T_ROLE) / .6))
+    if t < T_IF: return lerp(1.3, 7.85 / math.sqrt(T_VIB - T_IF + .03), ease((t - T_ENTER) / (T_IF - T_ENTER)) ** 2)
+    if t < T_VIB: return 7.85 / math.sqrt(T_VIB - t + .03)
+    return 0.
+
+
+DT = 1 / 480.
+T_TAB0, T_TAB1 = 86.0, 113.5
+_M = []
+
+
+def _build():
+    """mean anomaly M(t), anchored so that M(T_AM) = 0 (perigee) and M(T_PM) = π (apogee)"""
+    n = int((T_TAB1 - T_TAB0) / DT) + 2
+    M = [0.] * n
+    for i in range(1, n):
+        t = T_TAB0 + (i - .5) * DT
+        M[i] = M[i - 1] + mean_motion(t) * DT
+    i0 = int((T_AM - T_TAB0) / DT)
+    off = M[i0]
+    _M.extend(m - off for m in M)
+
+
+_build()
+
+
+def M_at(t):
+    x = (clamp(t, T_TAB0, T_TAB1 - DT) - T_TAB0) / DT
+    i = int(x); f = x - i
+    return _M[i] * (1 - f) + _M[i + 1] * f
+
+
+def kepler(M, e):
+    E = M if e < .8 else math.pi
+    for _ in range(8): E -= (E - e * math.sin(E) - M) / (1 - e * math.cos(E))
+    nu = 2 * math.atan2(math.sqrt(1 + e) * math.sin(E / 2), math.sqrt(1 - e) * math.cos(E / 2))
+    return nu, 1 - e * math.cos(E)
+
+
+def orbit_elems(t):
+    """semi-major axis, eccentricity, longitude of perigee (rad, chart frame, y up)"""
+    a, e, w = .5, .35, -math.pi / 2                                  # perigee at the bottom, apogee at the top
+    if t > T_ENTER:
+        k = ease((t - T_ENTER) / (T_IF - T_ENTER))
+        a = lerp(.5, .3, k); e = lerp(.35, .08, k)
+        w += -(M_at(t) - M_at(T_ENTER)) / (2 * math.pi) * math.radians(28)     # the perigee turns: a rosette
+    if t > T_IF:
+        tau = max(T_VIB - t, 0.)
+        a = .3 * (tau / (T_VIB - T_IF)) ** .25; e = .08 * (tau / (T_VIB - T_IF))
+        w = -math.pi / 2 - (M_at(T_IF) - M_at(T_ENTER)) / (2 * math.pi) * math.radians(28)
+    return a, e, w
+
+
+def rel(t):
+    """you relative to me (chart coords, y up), and your angle; the orbit runs clockwise"""
+    tt = min(t, T_VIB)
+    a, e, w = orbit_elems(tt)
+    nu, rr = kepler(M_at(tt), e)
+    th = w - nu
+    r = a * rr
+    return (r * math.cos(th), r * math.sin(th)), th
+
+
+def masses(t):
+    k = ease((t - T_SM) / .9)
+    m_me = .79 - .58 * k
+    share = ease((t - T_ROLE) / .8)                                  # before the switch of role I do not move
+    return m_me, (1 - m_me) * share
+
+
+def state(t):
+    (rx, ry), th = rel(t)
+    m_me, m_you = masses(t)
+    tot = m_me + m_you
+    me = (-rx * m_you / tot, -ry * m_you / tot)
+    you = (rx * m_me / tot, ry * m_me / tot)
+    if t >= T_VIB: me = you = (0., 0.)
+    return dict(me=me, you=you, th=th, m_me=m_me, m_you=m_you)
+
+
+def gw_amp(t):
+    if t < T_ENTER: return 0.
+    if t < T_IF: return .004 + .013 * ease((t - T_ENTER) / (T_IF - T_ENTER))
+    if t < T_VIB: return .012 + .12 / (1 + 2.2 * (T_VIB - t)) ** 1.6
+    return .13 * math.exp(-(t - T_VIB) / .32)
+
+
+def gw_phase(t):
+    """strain phase at the source: twice the orbital angle; after the merger it rings down at a fixed pitch"""
+    if t <= T_VIB: return -2 * rel(t)[1]
+    return -2 * rel(T_VIB)[1] + 2 * math.pi * 11 * (t - T_VIB)
+
+
+def strain(R, ang, t):
+    """radial strain at radius R, angle ang (chart), time t: the wave that left the centre R/c ago (plus polarisation,
+    its axis turning with the pair)"""
+    tr = t - R / CREST_C
+    A = gw_amp(tr)
+    if A <= 0: return 0.
+    return A * math.cos(2 * ang + gw_phase(tr))
+
+
+# ============================================================ the eye
+class Cam:
+    """perspective, looking at the chart's centre from above (el = 90°) down to edge-on; focal 1, distance D"""
+    def __init__(s, t, Wt):
+        s.Wt = Wt
+        if t < T_ENTER + .3: el, D = math.pi / 2, lerp(1., 1.9, ease((t - T_GEN - .15) / 2.))
+        elif t < T_IF:
+            k = ease((t - T_ENTER - .3) / (T_IF - T_ENTER - .45))
+            el, D = math.radians(90 - 89.85 * k ** 1.3), 1.9 + 1.4 * k ** 1.6
+        else:
+            k = outc((t - T_IF) / .7)
+            el, D = math.radians(.15 + 89.85 * k), lerp(3.3, 1.9, k)
+        s.el, s.D = el, D
+        s.cam = (0., D * math.sin(el), D * math.cos(el))
+        fw = (0., -math.sin(el), -math.cos(el))
+        s.fw = fw; s.rt = (1., 0., 0.)
+        s.up = (0., -fw[2], fw[1])
+        s.tilt = math.sin(el)
+
+    def P(s, x, y, h=0.):
+        """chart point (x, y up; h above the plane) -> screen (1080 units)"""
+        X, Y, Z = x, h, -y
+        v = (X - s.cam[0], Y - s.cam[1], Z - s.cam[2])
+        z = v[0] * s.fw[0] + v[1] * s.fw[1] + v[2] * s.fw[2]
+        z = max(z, 1e-3)
+        u = (v[0] * s.rt[0] + v[1] * s.rt[1] + v[2] * s.rt[2]) * 1.0 / z
+        w = (v[0] * s.up[0] + v[1] * s.up[1] + v[2] * s.up[2]) * 1.0 / z
+        return s.Wt / 2 + u * 1080, 540 - w * 1080
+
+    def depth(s, x, y):
+        v = (x - s.cam[0], -s.cam[1], -y - s.cam[2])
+        return max(v[0] * s.fw[0] + v[1] * s.fw[1] + v[2] * s.fw[2], 1e-3)
+
+
+# ============================================================ drawing
+F_ = 'C:/Windows/Fonts/'
+WARM, GOLD, GREEN, DIM, COP = (246, 232, 212), (206, 168, 104), (140, 255, 200), (120, 112, 100), (255, 170, 100)
+GLYPH = {'Sol': '☉', 'Luna': '☽', 'Mercurius': '☿', 'Venus': '♀', 'Mars': '♂', 'Iuppiter': '♃', 'Saturnus': '♄'}
+ROMAN = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI']
+LW = 1.7
+_F = {}
+
+
+class Cv:
+    def __init__(s, w, h):
+        s.w, s.h = w, h; s.k = 2 * h / 1080
+        s.img = Image.new('RGBA', (w * 2, h * 2), (0, 0, 0, 255)); s.d = ImageDraw.Draw(s.img)
+        s.Wt = w * 1080 / h
+
+    def font(s, n, sz):
+        key = (n, max(1, int(sz * s.k)))
+        if key not in _F: _F[key] = ImageFont.truetype(F_ + n, key[1])
+        return _F[key]
+
+    def line(s, pts, col, a=255, w=1.):
+        if a < 2 or len(pts) < 2: return
+        k = s.k
+        s.d.line([(x * k, y * k) for x, y in pts], fill=col + (int(clamp(a, 0, 255)),), width=max(1, int(w * LW * k * .6)))
+
+    def dot(s, x, y, r, col, a=255):
+        if a < 2: return
+        k = s.k
+        s.d.ellipse([(x - r) * k, (y - r) * k, (x + r) * k, (y + r) * k], fill=col + (int(clamp(a, 0, 255)),))
+
+    def text(s, x, y, t, fn, sz, col, a=255, anchor='mm', angle=0.):
+        if a < 3: return
+        f = s.font(fn, sz * 1.4); k = s.k
+        if abs(angle) < .5: s.d.text((x * k, y * k), t, font=f, fill=col + (int(clamp(a, 0, 255)),), anchor=anchor); return
+        bb = s.d.textbbox((0, 0), t, font=f, anchor='mm')
+        lay = Image.new('RGBA', (int(bb[2] - bb[0]) + 16, int(bb[3] - bb[1]) + 16), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).text((lay.width / 2, lay.height / 2), t, font=f, fill=col + (int(clamp(a, 0, 255)),), anchor='mm')
+        lay = lay.rotate(angle, resample=Image.BICUBIC, expand=True)
+        s.img.alpha_composite(lay, (int(x * k - lay.width / 2), int(y * k - lay.height / 2)))
+
+    def result(s): return s.img.convert('RGB').resize((s.w, s.h), Image.BOX)
+
+
+def rand_kick(R):
+    r = random.Random(int(R * 1000))
+    return r.uniform(-.05, .05), r.uniform(-.04, .04)
+
+
+class World:
+    """everything at time t that the drawing needs"""
+    def __init__(s, t):
+        s.t = t
+        s.st = state(t)
+        # rings after the merger: the merger's crest knocks each off centre when it reaches it; each heartbeat's crest,
+        # passing, takes half of that away; the last one (COMPLETION) takes the rest
+        s.crests = [b for b in HEART if t >= b] + ([T_COMP] if t >= T_COMP else [])
+
+    def offset(s, R):
+        t = s.t
+        tr = T_VIB + R / CREST_C
+        if t < tr: return (0., 0.)
+        kx, ky = rand_kick(R)
+        k = ease((t - tr) / .12)
+        for b in HEART + [T_COMP]:
+            tb = b + R / CREST_C
+            if t >= tb: k *= .5 if b != T_COMP else 0.
+            elif t >= tb - .12: k *= 1 - .5 * ease((t - tb + .12) / .12) if b != T_COMP else 1 - ease((t - tb + .12) / .12)
+        return kx * k, ky * k
+
+    def pulse(s, R):
+        """a heart crest passing this ring swells it a little"""
+        t = s.t; p = 0.
+        for b in HEART + [T_COMP]:
+            d = t - (b + R / CREST_C)
+            if -.05 < d < .5: p += math.exp(-abs(d) / .08) * (1.6 if b == T_COMP else 1.)
+        return p
+
+    def ring_pt(s, R, ang, center=(0., 0.)):
+        """a point of the ring R at chart angle ang (radians, ccw from +x), with the wave, the kick and the pulse"""
+        o = s.offset(R)
+        r = R * (1 + strain(R, ang, s.t) + .02 * s.pulse(R))
+        return center[0] + o[0] + r * math.cos(ang), center[1] + o[1] + r * math.sin(ang)
+
+
+def clock(a_deg):
+    """clock angle (0 = top, clockwise, degrees) -> chart angle (radians)"""
+    return math.radians(90 - a_deg)
+
+
+def draw(t, w, h):
+    c = Cv(w, h); Wt = c.Wt
+    cam = Cam(t, Wt)
+    W_ = World(t); st = W_.st
+    tilt = cam.tilt                                                   # 1 from above, 0 edge-on
+    txt = clamp((tilt - .55) / .35)                                   # type only while we look from above
+    left = ease((t - T_LEFT) / .6)
+    fade = 1 - .45 * left
+    crack = ease((t - T_LEFT - .1) / .3) * 16 if t >= T_LEFT else 0.  # every ring opens at the bottom
+    gapped = lambda cd: crack > 0 and abs(((cd % 360) + 360) % 360 - 180) < crack
+    P = cam.P
+
+    def ringline(R, col, a, wd=1., dots=0, n=None, grow=1., center=(0., 0.)):
+        n = n or max(60, int(R * 420))
+        pts = []
+        for i in range(n + 1):
+            cd = 180 + crack + (360 - 2 * crack) * i / n * grow           # from the bottom (my gap), clockwise
+            pts.append(P(*W_.ring_pt(R, clock(cd), center)))
+        if dots:
+            for p in pts[::dots]: c.dot(*p, 1.3, col, a * 1.3)
+        else: c.line(pts, col, a, wd)
+
+    def grow_of(k):
+        return outc((t - BEATS_GROW[k]) / .32) if k < len(BEATS_GROW) else 1.
+
+    # ---------------- the lattice: spacetime, lit on your side, pressed where the masses are
+    you, me = st['you'], st['me']
+    lat_a = ease((t - T_GEN - .3) / 1.2) * fade
+    if lat_a > 0:
+        sun = math.atan2(you[1] - me[1], you[0] - me[0])
+        for gx in range(-40, 41):
+            for gy in range(-26, 27):
+                x, y = gx * .045, gy * .045
+                r = math.hypot(x, y) + 1e-6; ang = math.atan2(y, x)
+                sr = strain(r, ang, t) if r > .05 else 0.
+                x2, y2 = x * (1 + sr), y * (1 + sr)
+                well = st['m_me'] / math.sqrt((x - me[0]) ** 2 + (y - me[1]) ** 2 + .03) + st['m_you'] / math.sqrt((x - you[0]) ** 2 + (y - you[1]) ** 2 + .03) * (1 if t < T_VIB else 0)
+                hgt = -.085 * well * lat_a
+                # seen from above, the sheet is drawn in toward each mass (the funnel, read as a bent grid)
+                for (mx, my_), mm in ((me, st['m_me']), (you, st['m_you'] if t < T_VIB else 0.)):
+                    dx, dy = x2 - mx, y2 - my_; dd = math.hypot(dx, dy) + 1e-6
+                    pull = .016 * mm * dd / (dd * dd + .12 * .12)
+                    x2 -= dx / dd * pull; y2 -= dy / dd * pull
+                tr = t - r / CREST_C
+                if gw_amp(tr) > 0: hgt += gw_amp(tr) / .13 * .05 / (.4 + r) * math.cos(2 * ang + gw_phase(tr)) * clamp((r - .05) / .2)
+                day = .55 + .45 * math.cos(ang - sun) if T_GEN < t < T_VIB else .7
+                e = (.13 + .05 * ((gx * 7 + gy * 13) % 5) / 4) * day
+                col = tuple(int(lerp(WARM[i], COP[i], clamp((well - 1.6) / 2.5))) for i in range(3))
+                sx, sy = P(x2, y2, hgt)
+                if -20 < sx < Wt + 20 and -20 < sy < 1100:
+                    c.dot(sx, sy, .9 + .6 * clamp((well - 2) / 3), col, 255 * e * lat_a * (1 + .6 * clamp((well - 1.6) / 2.5)))
+
+    # ---------------- crests: the two-armed spiral (while the pair turns), the round crests of the heart
+    if T_ENTER < t < T_VIB + .8:
+        ca = clamp(gw_amp(t - .3) * 20) * fade
+        for arm in (0, 1):
+            pts = []
+            for i in range(160):
+                R = .06 + i * .006
+                tr = t - R / CREST_C
+                if tr < T_ENTER: break
+                ang = (-gw_phase(tr) + arm * 2 * math.pi) / 2
+                pts.append(P(R * math.cos(ang), R * math.sin(ang)))
+            for p in pts[::2]: c.dot(*p, 1., GOLD, 110 * ca)
+    for b in HEART + [T_COMP] + ([T_VIB] if t >= T_VIB else []):
+        d = t - b
+        if 0 < d < 1.:
+            R = d * CREST_C
+            ringline(R, WARM if b != T_VIB else (255, 250, 240), (150 if b != T_VIB else 255) * (1 - d) * fade, 1.4 if b == T_VIB else 1., n=int(80 + R * 300))
+
+    # ---------------- the rings of the chart (world radii; the design's px × .002)
+    g = [grow_of(k) for k in range(5)]
+    # 1 · degrees: the longitudes you have passed stay lit
+    if g[0] > 0:
+        ringline(.30, GOLD, 120 * fade, grow=g[0]); ringline(.344, GOLD, 120 * fade, grow=g[0])
+        lit = swept_degrees(t)
+        for i in range(0, 360, 2):
+            if i > 360 * g[0] or gapped(180 + i): continue
+            cd = 180 + i
+            L = .036 if i % 30 == 0 else (.022 if i % 10 == 0 else .012)
+            on = lit[i // 2]
+            p0 = P(*W_.ring_pt(.30, clock(cd))); p1 = P(*W_.ring_pt(.30 + L + .012 * on, clock(cd)))
+            c.line([p0, p1], WARM if on else GOLD, (200 if on else 80) * fade, .9 if on else .7)
+    # 2 · the planets: your longitude (☉), the others where they are (still), my glyph under my gap
+    if g[1] > 0:
+        ringline(.41, WARM, 90 * fade, grow=g[1]); ringline(.49, WARM, 90 * fade, grow=g[1])
+        for i, (nm, cd0) in enumerate([('Luna', 38), ('Mercurius', 101), ('Iuppiter', 214), ('Saturnus', 292)]):
+            if (cd0 - 180) % 360 > 360 * g[1] or gapped(cd0): continue
+            p = P(*W_.ring_pt(.45, clock(cd0)))
+            c.text(*p, GLYPH[nm], 'seguisym.ttf', 15, WARM, 120 * fade * txt * g[1])
+        # you
+        if t < T_VIB:
+            yl = math.degrees(math.atan2(you[1] - st['me'][1] * 0, you[0]))
+            cd = 90 - math.degrees(math.atan2(you[1], you[0]))
+            p = P(*W_.ring_pt(.45, clock(cd)))
+            ya = ease((t - T_GEN - .8) / .5) * fade
+            c.text(*p, '☉', 'seguisym.ttf', 17, WARM, 255 * ya * max(txt, .3))
+            circ(c, cam, W_.ring_pt(.45, clock(cd)), .024, WARM, 200 * ya)
+            c.line([P(*W_.ring_pt(.41, clock(cd))), P(*you)], WARM, 70 * ya, .6)             # a leader to you
+        # me: after the switch of role I have a longitude too, opposite yours
+        if T_ROLE + .3 < t < T_VIB:
+            cd = 90 - math.degrees(math.atan2(me[1], me[0]))
+            ma = ease((t - T_ROLE - .3) / .5) * fade
+            p = P(*W_.ring_pt(.45, clock(cd)))
+            c.text(*p, my_glyph(t), 'seguisym.ttf', 17, WARM, 255 * ma * max(txt, .3))
+            circ(c, cam, W_.ring_pt(.45, clock(cd)), .024, WARM, 200 * ma)
+        if t >= T_VIB:                                                    # one mark now: both, in one place
+            cd = 0.
+            ma = ease((t - T_VIB) / .3) * fade
+            if not gapped(cd):
+                c.text(*P(*W_.ring_pt(.45, clock(cd))), '⊙', 'seguisym.ttf', 18, WARM, 255 * ma * max(txt, .3))
+                circ(c, cam, W_.ring_pt(.45, clock(cd)), .026, WARM, 220 * ma)
+        # the slot under my gap: my glyph (before the role switch)
+        if t < T_ROLE + .3:
+            sa = ease((t - T_GEN - .6) / .4) * (1 - ease((t - T_ROLE) / .3))
+            flip = ease((t - T_FMHIT + .1) / .2)
+            p = P(*W_.ring_pt(.45, clock(180)))
+            c.text(p[0], p[1], '♀', 'seguisym.ttf', 18, WARM, 255 * sa * (1 - flip) * txt)
+            c.text(p[0], p[1], '♂', 'seguisym.ttf', 18, WARM, 255 * sa * flip * txt)
+            circ(c, cam, W_.ring_pt(.45, clock(180)), .026, WARM, 220 * sa)
+    # 3 · hours; the ones the hand has passed lit
+    if g[2] > 0:
+        ringline(.536, GOLD, 90 * fade, grow=g[2]); ringline(.60, GOLD, 90 * fade, grow=g[2])
+        hand_cd = hand_angle(t)
+        for i in range(24):
+            cd = i * 15
+            if (cd - 180) % 360 > 360 * g[2] or gapped(cd) or gapped(cd + 7.5): continue
+            passed = hour_passed(t, cd)
+            p = P(*W_.ring_pt(.568, clock(cd)))
+            c.text(*p, ROMAN[i % 12], 'GARA.TTF', 12, WARM, (240 if passed else 150) * fade * txt * g[2], angle=-cd)
+            c.line([P(*W_.ring_pt(.536, clock(cd + 7.5))), P(*W_.ring_pt(.60, clock(cd + 7.5)))], GOLD, 70 * fade, .6)
+    # 4 · your orbit (me at its focus), while it is one
+    oa = ease((t - T_GEN - 1.) / .8) * (1 - ease((t - T_ENTER) / 1.)) * fade
+    if oa > 0:
+        a, e, wp = orbit_elems(t)
+        pts = []
+        for i in range(181):
+            nu = 2 * math.pi * i / 180
+            r = a * (1 - e * e) / (1 + e * math.cos(nu))
+            th = wp - nu
+            x, y = me[0] + r * math.cos(th), me[1] + r * math.sin(th)
+            pts.append(P(x, y))
+        c.line(pts, GOLD, 110 * oa, .8)
+        # its perigee and apogee, marked
+        for nu, lab in ((0., 'PERIGAEUM'), (math.pi, 'APOGAEUM')):
+            r = a * (1 - e * e) / (1 + e * math.cos(nu)); th = wp - nu
+            q = P(me[0] + r * math.cos(th), me[1] + r * math.sin(th))
+            c.dot(*q, 2.4, GOLD, 200 * oa)
+            c.text(q[0] + 16, q[1] + (14 if nu == 0 else -14), lab, 'GARA.TTF', 9, GOLD, 180 * oa * txt, anchor='lm')
+    # 5 · the band of twelve: equal times, unequal angles; filled as you sweep them
+    if g[3] > 0:
+        ringline(.66, WARM, 80 * fade, grow=g[3]); ringline(.76, WARM, 80 * fade, grow=g[3])
+        cuts = kepler_cuts()
+        swept = swept_sectors(t)
+        for k in range(12):
+            a0, a1 = cuts[k], cuts[(k + 1) % 12]
+            if a1 <= a0: a1 += 360
+            if (a0 - 180) % 360 > 360 * g[3]: continue
+            if not gapped(a0): c.line([P(*W_.ring_pt(.66, clock(a0))), P(*W_.ring_pt(.76, clock(a0)))], WARM, 130 * fade, .8)
+            on = swept[k]
+            n = max(3, int((a1 - a0) / 3.5))
+            for j in range(1, n):
+                fa = a0 + (a1 - a0) * j / n
+                if gapped(fa): continue
+                if on: c.line([P(*W_.ring_pt(.668, clock(fa))), P(*W_.ring_pt(.752, clock(fa)))], GOLD, 110 * fade, .6)
+                else: c.dot(*P(*W_.ring_pt(.71, clock(fa))), 1.1, GOLD, 70 * fade)
+    # 6 · the outer: the detector
+    if g[4] > 0:
+        ringline(.824, WARM, 110 * fade, dots=3, grow=g[4])
+        ringline(.88, WARM, 110 * fade, grow=g[4]); ringline(.894, WARM, 70 * fade, .6, grow=g[4])
+        for i in range(0, 360, 6):
+            if i > 360 * g[4] or gapped(180 + i): continue
+            cd = 180 + i
+            c.line([P(*W_.ring_pt(.894, clock(cd))), P(*W_.ring_pt(.894 + (.028 if i % 30 == 0 else .012), clock(cd)))], WARM, 110 * fade, .7)
+        da = ease((t - T_ENTER) / .6) * fade
+        for lab, cd in DETECTORS:
+            p = P(*W_.ring_pt(.88, clock(cd)))
+            c.line([(p[0] - 7, p[1] + 12), (p[0], p[1]), (p[0] + 7, p[1] + 12), (p[0] - 7, p[1] + 12)], GREEN, 220 * da, 1.)
+            c.text(p[0], p[1] + 28, lab, 'CascadiaMono.ttf', 9, GREEN, 210 * da * txt)
+
+    # ---------------- my ring, your star, the centre
+    draw_bodies(c, cam, W_, t, fade, txt)
+    draw_instrument(c, t, fade, txt)
+    draw_legend(c, t, fade, txt)
+    # the plane edge-on is a line (as s08 ended): draw it faintly while we are low
+    if tilt < .08:
+        la = (1 - tilt / .08) * .9
+        c.line([(0, 540), (Wt, 540)], WARM, 120 * la, 1.2)
+    return c.result()
+
+
+DETECTORS = [('ME', 200.), ('YOU', 160.)]
+
+
+def my_glyph(t): return '♂' if t >= T_FMHIT else '♀'
+
+
+def circ(c, cam, center, r, col, a):
+    pts = [cam.P(center[0] + r * math.cos(2 * math.pi * i / 30), center[1] + r * math.sin(2 * math.pi * i / 30)) for i in range(31)]
+    c.line(pts, col, a, .7)
+
+
+# ---- what has been swept
+def _longitude_cd(t):
+    (rx, ry), th = rel(t)
+    return (90 - math.degrees(th)) % 360
+
+
+def swept_degrees(t):
+    """which 2° cells your longitude has passed since the chart began"""
+    lit = [False] * 180
+    if t < T_GEN + .6: return lit
+    t0 = T_GEN + .6
+    n = int((min(t, T_VIB) - t0) / .01)
+    for i in range(n + 1):
+        tt = t0 + i * .01
+        lit[int(_longitude_cd(tt) // 2) % 180] = True
+    return lit
+
+
+def hand_angle(t):
+    """the hand: the line from me to you (clock degrees); after the merger it steps one hour a beat, to XII at COMPLETION"""
+    if t < T_VIB: return _longitude_cd(t)
+    base = _longitude_cd(T_VIB)
+    target = 360.
+    steps = [b for b in HEART + [T_COMP] if t >= b]
+    n = len(steps)
+    k = (base + (target - base) * n / 5) % 360 if n < 5 else 0.
+    return k
+
+
+def hour_passed(t, cd):
+    if t < T_AM: return False
+    if t < T_VIB:
+        a0 = _longitude_cd(T_AM); a1 = _longitude_cd(t)
+        span = (a1 - a0) % 360 if t < T_PM + .01 else 360
+        return (cd - a0) % 360 <= span + .1 and span > 0
+    return True
+
+
+_CUTS = []
+
+
+def kepler_cuts():
+    """12 moments of equal time round your first orbit (a = .5, e = .35): their clock angles"""
+    if not _CUTS:
+        for k in range(12):
+            nu, rr = kepler(k * math.pi / 6, .35)
+            th = -math.pi / 2 - nu
+            _CUTS.append((90 - math.degrees(th)) % 360)
+        _CUTS.sort()
+    return _CUTS
+
+
+def swept_sectors(t):
+    cuts = kepler_cuts()
+    out = [False] * 12
+    if t < T_GEN + .8: return out
+    tt = T_GEN + .8
+    while tt <= min(t, T_ROLE):
+        cd = _longitude_cd(tt)
+        for k in range(12):
+            a0, a1 = cuts[k], cuts[(k + 1) % 12]
+            if a1 <= a0: a1 += 360
+            if a0 <= cd < a1 or a0 <= cd + 360 < a1: out[k] = True
+        tt += .02
+    return out
+
+
+def draw_bodies(c, cam, W_, t, fade, txt):
+    st = W_.st; P = cam.P
+    me, you = st['me'], st['you']
+    # my ring: out of the gathered sky (t02's circle, radius ~.463 of the screen) down to its size; smaller when we move
+    intro = ease((t - T_GEN) / .45)
+    Rw = lerp(.22, .07, ease((t - T_ROLE) / .8))
+    if t >= T_VIB: Rw = lerp(.07, .22, outc((t - T_VIB) / .5))
+    gap = 27.
+    if t >= T_VIB:
+        gap = 27 * (1 - ease((t - T_FIN) / (T_COMP - T_FIN)))
+        if t >= T_LEFT: gap = 27 * ease((t - T_LEFT - .1) / .3)
+    cx, cy = P(*me)
+    Rs = abs(P(me[0] + Rw, me[1])[0] - cx)
+    Rs_screen = lerp(.463 * 1080, Rs, intro)
+    ry = Rs_screen * max(cam.tilt, .02) if intro >= 1 else Rs_screen
+    pts = []
+    for i in range(241):
+        cd = 180 + gap + (360 - 2 * gap) * i / 240
+        a = clock(cd)
+        pts.append((cx + Rs_screen * math.cos(a), cy - ry * math.sin(a)))
+    arcs = 1 - intro                                           # at first only the star's two arcs (as t02 left them)
+    if arcs > 0:
+        for a0, a1 in ((-40, 40), (140, 220)):
+            q = [(cx + Rs_screen * math.cos(math.radians(a)), cy - Rs_screen * math.sin(math.radians(a))) for a in range(a0, a1 + 1, 3)]
+            c.line(q, WARM, 255 * arcs, 2.6)
+    c.line(pts, WARM, 255 * intro * fade, 2.6)
+    # ♀ out of the gap, then ♂, then the arrow swings round to you and is the hand
+    base = (cx, cy + ry)
+    cross = outc((t - T_GEN - .25) / .8) * (1 - ease((t - T_FM) / .3))
+    if cross > 0:
+        L = Rs_screen * 1.1 * cross
+        c.line([base, (base[0], base[1] + L)], WARM, 255, 2.2)
+        if cross > .5: c.line([(base[0] - Rs_screen * .45, base[1] + Rs_screen * .6), (base[0] + Rs_screen * .45, base[1] + Rs_screen * .6)], WARM, 255 * (cross - .5) * 2, 2.2)
+    arrow = ease((t - T_FM) / .3) * (1 - ease((t - T_WHAT - .4) / .2))
+    swing = ease((t - T_WHAT) / .45)
+    if arrow > 0 or (T_WHAT <= t < T_VIB + 5):
+        # the arrow's angle: 45° (♂) → toward you; after that the hand is just the line toward you
+        a_m = math.radians(45)
+        cd_you = hand_angle(t)
+        a_you = math.radians(90 - cd_you)
+        d = (a_you - a_m + math.pi) % (2 * math.pi) - math.pi
+        ang = a_m + d * swing
+        if arrow > 0:
+            b0 = (cx + Rs_screen * math.cos(ang), cy - Rs_screen * math.sin(ang))
+            tip = (cx + Rs_screen * 2.1 * math.cos(ang), cy - Rs_screen * 2.1 * math.sin(ang))
+            c.line([b0, tip], WARM, 255 * arrow, 2.2)
+            for s_ in (-1, 1):
+                ah = ang + math.pi + s_ * math.radians(28)
+                c.line([tip, (tip[0] + Rs_screen * .4 * math.cos(ah), tip[1] - Rs_screen * .4 * math.sin(ah))], WARM, 255 * arrow, 2.2)
+        # the hand: from the centre through you to the hours (after it has swung)
+        ha = ease((t - T_WHAT - .3) / .3) * fade
+        if ha > 0:
+            cd = hand_angle(t)
+            a = clock(cd)
+            p0 = P(me[0] + Rw * 1.15 * math.cos(a), me[1] + Rw * 1.15 * math.sin(a)) if t < T_VIB else P(.25 * math.cos(a), .25 * math.sin(a))
+            p1 = P(.54 * math.cos(a), .54 * math.sin(a))
+            c.line([p0, p1], WARM, 230 * ha, 1.6)
+    # PM: every mark in line — a flash along the line
+    if T_PM - .02 < t < T_PM + .6:
+        k = math.exp(-(t - T_PM) / .15)
+        c.line([P(0, .22), P(0, .93)], (255, 250, 240), 255 * k, 2.4)
+        for R in (.32, .45, .568, .71, .824, .887): c.dot(*P(0, R), 4 * k + 1, (255, 250, 240), 255 * k)
+    # the centre of mass
+    ba = ease((t - T_ROLE - .4) / .4) * (1 - ease((t - T_TR) / .6)) * fade
+    if ba > 0:
+        o = P(0, 0)
+        c.line([(o[0] - 12, o[1]), (o[0] + 12, o[1])], COP, 255 * ba, 1.2); c.line([(o[0], o[1] - 12), (o[0], o[1] + 12)], COP, 255 * ba, 1.2)
+    # you: a star; your recent path (a rosette while the perigee turns)
+    if t < T_VIB:
+        ya = ease((t - T_GEN - .8) / .5) * fade
+        trail = []
+        for i in range(0, 260):
+            tt = t - i * .012
+            if tt < T_GEN + .8: break
+            trail.append(P(*state(tt)['you']))
+        if len(trail) > 2:
+            for i in range(0, len(trail) - 1, 2): c.line(trail[i:i + 3], GOLD, 140 * ya * (1 - i / len(trail)), .8)
+        if t > T_ROLE:
+            trm = [P(*state(t - i * .012)['me']) for i in range(0, 160)]
+            for i in range(0, len(trm) - 1, 2): c.line(trm[i:i + 3], WARM, 90 * (1 - i / len(trm)) * fade, .7)
+        yx, yy = P(*you)
+        c.dot(yx, yy, 5.5, (255, 248, 236), 255 * ya)
+        c.dot(yx, yy, 11, WARM, 50 * ya)
+    elif t < T_VIB + .5:                                        # the merger: a flash at the centre
+        k = math.exp(-(t - T_VIB) / .12)
+        o = P(0, 0); c.dot(*o, 30 * k + 4, (255, 250, 240), 255 * k)
+    # inside my ring after the merger: ringdown, then the heartbeat, swept in like a monitor; flat when you have left
+    if t >= T_VIB:
+        ga = ease((t - T_VIB) / .25)
+        R = Rs_screen * .86
+        pts = []
+        last = max([b for b in HEART if b <= t], default=None)
+        for i in range(161):
+            x = -1 + i / 80
+            if last is None:
+                y = .5 * math.exp(-(t - T_VIB) * 2.5) * math.exp(-abs(x) * 1.5) * math.sin(x * 18 - (t - T_VIB) * 30)
+            else:
+                e = .55 * math.exp(-((x - .02) / .03) ** 2) - .18 * math.exp(-((x + .05) / .03) ** 2) - .22 * math.exp(-((x - .15) / .04) ** 2) + .1 * math.exp(-((x + .3) / .07) ** 2)
+                y = e * (1 - ease((t - T_LEFT) / .15))
+            pts.append((cx + x * R, cy - y * R * .9))
+        sweep = 1. if last is None else clamp((t - last) / .35)
+        if t >= T_COMP: sweep = 1.
+        c.line(pts[:max(2, int(len(pts) * sweep))], GREEN, 240 * ga, 1.6)
+
+
+def detector_signal(t, cd):
+    """what a detector mark on the outer ring writes: the wave reaching it; later the heart's crests"""
+    R = .88
+    ang = clock(cd)
+    v = strain(R, ang, t) / .13
+    tr = t - R / CREST_C
+    for b in HEART + [T_COMP]:
+        x = tr - b
+        if -.1 < x < .5:
+            v += (.55 * math.exp(-((x - .02) / .015) ** 2) - .2 * math.exp(-((x + .02) / .015) ** 2) - .25 * math.exp(-((x - .06) / .02) ** 2) + .12 * math.exp(-((x - .22) / .05) ** 2)) * 1.4
+    if tr >= T_LEFT: v = 0.
+    return v
+
+
+def draw_instrument(c, t, fade, txt):
+    Wt = c.Wt
+    ia = ease((t - T_ENTER) / .5) * fade
+    if ia <= 0: return
+    y0 = 965
+    c.line([(120, y0 - 70), (Wt - 120, y0 - 70)], DIM, 80 * ia, .6)
+    span = 3.4
+    for j, (lab, cd) in enumerate(DETECTORS):
+        col = WARM if j == 0 else GREEN
+        pts = []
+        for i in range(600):
+            u = i / 599
+            tt = t - span + u * span
+            x = 180 + u * (Wt - 560)
+            v = detector_signal(tt, cd) if tt > T_ENTER else 0.
+            yo = (-7 if j == 0 else 7) * (1 - ease((tt - T_VIB) / .4))
+            pts.append((x, y0 - 30 + yo - 24 * v))
+        c.line(pts, col, 220 * ia, 1.2)
+        c.text(150, y0 - 30 + (-7 if j == 0 else 7), lab, 'CascadiaMono.ttf', 11, col, 200 * ia, anchor='rm')
+    # the time-frequency picture: twice the orbit's frequency, as it climbs
+    sx0, sy0 = Wt - 330, 862
+    sa = ia * (1 - ease((t - T_THEN) / .5))
+    if sa > 0:
+        c.line([(sx0, 1010), (Wt - 120, 1010)], DIM, 120 * sa, .6); c.line([(sx0, sy0), (sx0, 1010)], DIM, 120 * sa, .6)
+        for i in range(40):
+            tt = T_ENTER + i / 39 * (T_VIB + .3 - T_ENTER)
+            f = 2 * mean_motion(tt) / (2 * math.pi) if tt < T_VIB else 11.
+            curve = clamp(math.log(1 + f) / math.log(1 + 16))
+            for j in range(18):
+                fy = 1 - j / 18
+                v = math.exp(-((fy - curve) / .07) ** 2) * (tt <= t) * (gw_amp(tt) / .13 + .2)
+                if v > .04: c.dot(sx0 + 5 + i * 5, sy0 + 5 + j * 7.8, 1.25, GREEN, 170 * clamp(v) * sa)
+        c.text(sx0, sy0 - 16, 'f  [Hz]', 'CascadiaMono.ttf', 10, GREEN, 170 * sa, anchor='lm')
+
+
+def draw_legend(c, t, fade, txt):
+    Wt = c.Wt
+    st = state(t)
+    la = ease((t - T_GEN - .5) / .6) * fade
+    # the readouts (what s08 read, now of this system)
+    ra = ease((t - T_GEN - 1.) / .5) * fade
+    if t < T_THEN:
+        tot = st['m_me'] + st['m_you'] if st['m_you'] > .01 else st['m_me']
+        mm = st['m_me'] / (st['m_me'] + max(st['m_you'], 1e-6)) if st['m_you'] > .01 else 1.
+        n = mean_motion(t)
+        rows = [('M_ego : M_tu', f'{mm:.2f} : {1 - mm:.2f}'), ('P_orb', f'{2 * math.pi / n:5.2f} s' if n > 0 else '—'),
+                ('f_GW', f'{2 * n / (2 * math.pi):5.2f} Hz' if t > T_ENTER else '—'), ('h(t)', f'{gw_amp(t) * 8e-21:.1e}' if t > T_ENTER else '—')]
+    else:
+        rows = [('HR', ' 65 bpm' if t < T_LEFT else '  0 bpm'), ('RR', '0.927 s' if t < T_LEFT else '    — s'),
+                ('rhythm', 'sinus' if t < T_LEFT else '—'), ('lead', 'ME·YOU')]
+    for i, (k, v) in enumerate(rows):
+        c.text(Wt - 90, 120 + i * 26, f'{k:<13}{v:>10}', 'CascadiaMono.ttf', 12, GREEN if t > T_ENTER else WARM, 140 * ra, anchor='rm')
+    # the table
+    x, y = 90, 380
+    c.text(x, y - 40, 'TABULA', 'GARA.TTF', 14, GOLD, 200 * la, anchor='lm')
+    rows = [(my_glyph(t) if t < T_VIB else '⊙', 'Ego' if t < T_VIB else 'Ego · Tu', 255), ('☉', 'Tu', 255 if t < T_VIB else 0),
+            ('☽', 'Luna', 150), ('☿', 'Mercurius', 150), ('♃', 'Iuppiter', 150), ('♄', 'Saturnus', 150)]
+    yy = y
+    for g, l, a in rows:
+        if a <= 0: continue
+        c.text(x + 10, yy, g, 'seguisym.ttf', 16, WARM, a * la)
+        c.text(x + 36, yy, l, 'GARAIT.TTF', 16, WARM, a * .75 * la, anchor='lm')
+        yy += 28
+    # the key to the band
+    c.text(x, yy + 30, 'AREAE AEQUALES', 'GARA.TTF', 12, GOLD, 170 * la * ease((t - T_GEN - 1.5) / .5) * (1 - ease((t - T_ENTER) / .5)), anchor='lm')
+    c.text(x, yy + 52, 'temporibus aequalibus', 'GARAIT.TTF', 12, GOLD, 150 * la * ease((t - T_GEN - 1.5) / .5) * (1 - ease((t - T_ENTER) / .5)), anchor='lm')
+    # the key to the wave
+    if t > T_ENTER:
+        pa = ease((t - T_ENTER) / .5) * fade
+        c.text(90, 108, 'POLARISATIO  +', 'GARA.TTF', 13, GOLD, 170 * pa, anchor='lm')
+        ph = gw_phase(t - .6)
+        amp = clamp(gw_amp(t - .6) * 10)
+        for i in range(4):
+            hh = .3 * math.cos(ph + i * math.pi / 2) * amp
+            for a in range(0, 40, 2):
+                th = a / 20 * math.pi
+                c.dot(120 + i * 60 + 20 * (1 + hh) * math.cos(th), 160 + 20 * (1 - hh) * math.sin(th), 1.2, WARM, 170 * pa)
+    # caption, bottom centre
+    cap = ('SYZYGIA' if T_PM - .3 < t < T_ROLE + .8 else 'MOTUS' if t < T_IF else 'VIBRATIONES' if t < T_THEN else 'COMPLETIO' if t < T_LEFT else '')
+    if cap and t < T_ENTER or cap in ('VIBRATIONES', 'COMPLETIO'): c.text(Wt / 2, 1040 - 20, cap, 'GARA.TTF', 13, GOLD, 150 * la * txt)
+    # the frame
+    c.line([(40, 40), (Wt - 40, 40), (Wt - 40, 1040), (40, 1040), (40, 40)], DIM, 60 * la, 1)
+    for px_, py_ in ((40, 40), (Wt - 40, 40), (40, 1040), (Wt - 40, 1040)):
+        c.line([(px_ - 14, py_), (px_ + 14, py_)], WARM, 130 * la); c.line([(px_, py_ - 14), (px_, py_ + 14)], WARM, 130 * la)
+
+
+def textures(t, w, h):
+    return {'u_img': draw(t, w, h)}

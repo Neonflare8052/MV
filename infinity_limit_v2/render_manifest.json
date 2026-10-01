@@ -1,0 +1,22 @@
+{
+  "source_start": 39.0,
+  "source_end": 44.45,
+  "fps": 60,
+  "frames": 327,
+  "duration": 5.45,
+  "size": [
+    1920,
+    1080
+  ],
+  "elapsed": 3.8910000000032596,
+  "subframes": 4,
+  "design": "Ballistic recipient with conserved horizontal momentum; velocity-following camera; independently advected point field decelerating only at the moving boundary.",
+  "action_times": {
+    "infinity": 40.706,
+    "physical_edge_release": 40.81583333333333,
+    "boundary_start": 42.346,
+    "boundary_complete": 43.507
+  },
+  "point_count": 17920,
+  "source_method": "Code-authored OpenGL only; original local audio, no lyrics or parameter overlays."
+}

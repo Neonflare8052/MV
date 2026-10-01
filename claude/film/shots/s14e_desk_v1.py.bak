@@ -1,0 +1,492 @@
+"""s14e (desk) · 2:46.016–2:54.975  on the operator's desk in the Chinese Room: Turing's papers, the letter, file C-3.
+One eye throughout: straight down, orthographic; a lamp to the upper left.  (draft v2, replaces s14e_letter + s14g)
+
+2:46.016 Then I can           the envelope on the desk, in the lamp's light; the red point on it.
+2:46.47 … 2:48.33 be your only   his papers fall round it, one a beat, in order of their years.
+2:48.911 EXECUTION            the red point pressed into wax: the gapped ring.
+2:49.824 If I can have you back   the wax cracks, the flap lifts, the letter comes out and unfolds on the desk.
+2:51.868 I will run the       a hand comes in and picks it up (its shadow leaves it); turns it over: 爱, upright.
+2:52.712 EXECUTION            the other arm sweeps the papers off the desk.  The letter is set down; the view opens out.
+2:53.42                       the rule book, drawn in from the far edge, slapped open.
+2:53.643 Though we are trapped   a finger down the rows; one page turned (2:53.884); it lands on 爱 → see shelf C, no. 3.
+2:54.348                      the hand goes to the shelf by the desk and draws out file C-3; its detail unrolls:
+                              M.U.C.'s love letter.  Your pointer comes in and double-clicks it (2:54.811).
+
+Legible words are verified originals (see papers.py); the rest is typesetting texture."""
+import sys, math, random, importlib.util
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter, ImageChops
+
+_D = Path(__file__).resolve().parent
+def _load(name, file):
+    sp = importlib.util.spec_from_file_location(name, _D / file); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m
+S14E = _load('s14e_l', 's14e_letter.py')
+G = _load('s14g_d', 's14g_plan.py')
+PAP = _load('papers_d', 'papers.py')
+
+T_CUT, T_HIT, T_BACK, T_RUN, T_X = 166.016, 168.911, 169.824, 171.868, 172.712
+LAND = S14E.LAND
+LAY = S14E.LAY
+T_SET, T_BOOK, TD, FLIP, T_REACH, T_LAY, T_SQ = 172.957, 173.421, 173.643, 173.884, 174.348, 174.62, 174.975
+CLICKS = (174.69, 174.811)
+POST = dict(u_bloom=0., u_ca=0., u_grain=.012)
+
+S0 = 875. / .297                               # px per metre (1080 units) with the camera at 1: the letter as it was
+K = S0 / 1080.                                 # units (screen heights) per metre
+LETC = (1.72, 1.45)                            # where the envelope and the letter lie (world metres, y toward him)
+LET1 = G.LET1                                  # where the letter is set down, left of the book
+CAM2, Z2 = G.CAM2, G.S2 / S0
+CAM3, Z3 = G.CAM3, G.S3 / S0
+LAMP = (1.40, 1.00)
+POOL = (1.80, 1.38)
+MAN = G.MAN
+
+
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+def lerp2(a, b, k): return (lerp(a[0], b[0], k), lerp(a[1], b[1], k))
+def q2w(q): return (LETC[0] + q[0] / K, LETC[1] - q[1] / K)       # letter space (units, y up) -> world
+def w2q(w): return ((w[0] - LETC[0]) * K, -(w[1] - LETC[1]) * K)
+
+
+# ---------------- the camera
+def cam(t):
+    if t < 172.80: return LETC, 1.
+    if t < T_REACH:
+        e = ease((t - 172.80) / .3)
+        return lerp2(LETC, CAM2, e), math.exp(lerp(0., math.log(Z2), e))
+    e = ease((t - T_REACH) / .16)
+    return lerp2(CAM2, CAM3, e), math.exp(lerp(math.log(Z2), math.log(Z3), e))
+
+
+# ---------------- the letter: picked up, turned over, set down
+def letter_state(t):
+    lift = .075 * ease((t - (T_RUN - .06)) / .16) * (1 - ease((t - (T_SET - .08)) / .14))
+    flip = ease((t - (T_RUN + .04)) / .34)
+    pos = lerp2(LETC, LET1, ease((t - (T_SET - .12)) / .2))
+    return pos, 1. + lift, flip, lift / .075
+
+
+# ---------------- the sweep: his left forearm, pivoting at a leaning shoulder, clears the desk right to left
+SW0, SW1 = 172.60, 172.86
+SHL = (1.62, 1.98)
+
+
+def sweep_angle(t):
+    """angle of the arm from the shoulder (world, y down): from up-right to left"""
+    return lerp(-1.02, -2.75, ease((t - SW0) / (SW1 - SW0)))
+
+
+def paper_hit(c):
+    """when the arm passes a paper centre c (world), and the push direction"""
+    dx, dy = c[0] - SHL[0], c[1] - SHL[1]
+    a = math.atan2(dy, dx)
+    a0, a1 = sweep_angle(SW0), sweep_angle(SW1)
+    k = (a - a0) / (a1 - a0)
+    # invert the ease: find u with ease(u) = k
+    lo, hi = 0., 1.
+    for _ in range(30):
+        m = (lo + hi) / 2
+        if ease(m) < k: lo = m
+        else: hi = m
+    th = SW0 + (SW1 - SW0) * clamp(lo, 0, 1)
+    tang = (math.sin(a), -math.cos(a))                               # the direction the arm moves there
+    return th, tang
+
+
+HITS = []
+for i, ((cx, cy), ang) in enumerate(LAY):
+    c = q2w((cx, cy))
+    th, tang = paper_hit(c)
+    r = random.Random(40 + i)
+    v = r.uniform(3.0, 4.2)
+    HITS.append((th, (tang[0] * v - 2.6 + r.uniform(-.4, .2), tang[1] * v * .5 + .6 + r.uniform(-.3, .3)), r.uniform(-7, 7)))
+
+
+def paper_state(i, t):
+    """(q centre, angle rad, drop, alpha)"""
+    (cx, cy), ang = LAY[i]
+    tl = LAND[i]
+    if t < tl - .17: return None
+    a = clamp((t - tl + .17) / .17)
+    drop = (1 - a) ** 2
+    alpha = min(1., a * 3.)
+    th, V, spin = HITS[i]
+    ang = math.radians(ang)
+    if t > th:
+        k = (1 - math.exp(-(t - th) / .22)) * .22
+        w = q2w((cx, cy))
+        w = (w[0] + V[0] * k, w[1] + V[1] * k)
+        ang += spin * k
+        # off the desk's edge it drops out of the light
+        alpha *= clamp((w[0] - (G.DESK[0] - .12)) / .12) * clamp(((G.DESK[3] + .1) - w[1]) / .1) * clamp((w[1] - (G.DESK[1] - .1)) / .1)
+        cx, cy = w2q(w)
+    return (cx, cy), ang, drop, alpha
+
+
+SRC = S14E.SRC
+# ---- the shader, adapted: world camera, a desk under a lamp, paper stock, the overlay layers
+SRC = SRC.replace("uniform sampler2D u_front, u_back, u_pages;",
+"""uniform sampler2D u_front, u_back, u_pages, u_over, u_ui;
+uniform vec2 u_cam; uniform float u_camz, u_lift, u_hasOver;
+uniform vec2 u_letW;
+uniform vec3 u_stock[7]; uniform vec2 u_age[7];""")
+SRC = SRC.replace("const vec2 EH = vec2(.31, .22);", """const float K = %K%;
+const vec2 LETC = vec2(%LX%, %LY%);
+const vec2 LAMP = vec2(%AX%, %AY%);
+const vec2 POOL = vec2(%PX%, %PY%);
+const vec4 DESK = vec4(%D0%, %D1%, %D2%, %D3%);
+const vec2 EH = vec2(.31, .22);""".replace('%K%', '%.5f' % K).replace('%LX%', '%.4f' % LETC[0]).replace('%LY%', '%.4f' % LETC[1])
+   .replace('%AX%', '%.4f' % LAMP[0]).replace('%AY%', '%.4f' % LAMP[1]).replace('%PX%', '%.4f' % POOL[0]).replace('%PY%', '%.4f' % POOL[1])
+   .replace('%D0%', '%.3f' % G.DESK[0]).replace('%D1%', '%.3f' % G.DESK[1]).replace('%D2%', '%.3f' % G.DESK[2]).replace('%D3%', '%.3f' % G.DESK[3]))
+# the letter: placed in the world, and lifted (a little bigger as it nears the eye)
+SRC = SRC.replace("  p.x -= u_letX; p.y -= u_letY;\n  p /= u_zoom;",
+                  "  p.x -= u_letX; p.y -= u_letY;\n  p -= vec2(u_letW.x - LETC.x, -(u_letW.y - LETC.y)) * K;\n  p /= u_zoom * u_lift;")
+# the papers: their stock
+SRC = SRC.replace("""  vec3 c = PAPER * (.955 + .05 * fbm(q * 50. + float(i) * 7.));
+  if(i == 0) c *= vec3(1., .985, .95);                             // the manuscript: an older, warmer paper
+  c = mix(c, INK, ink * .92);""",
+"""  vec3 c = u_stock[i] * (.955 + .05 * fbm(q * 50. + float(i) * 7.) + .02 * (vn(q * 900.) - .5));
+  float edge0 = min(hs.x - abs(q.x), hs.y - abs(q.y));
+  c *= mix(vec3(1.), vec3(.9, .8, .62), u_age[i].x * (1. - smoothstep(0., .03, edge0)));           // yellowed at the edges
+  float fox = smoothstep(.72, .8, fbm(q * 22. + float(i) * 13.)) * u_age[i].x;
+  c = mix(c, c * vec3(.86, .74, .58), fox * .6);                                                  // foxing
+  if(u_age[i].y > 0.){                                                                             // a fold: ridge and valley
+    float fy = u_age[i].y > 1.5 ? 0. : hs.y / 3.;
+    float dfy = q.y - fy;
+    c *= 1. + .06 * (smoothstep(-.012, 0., dfy) - smoothstep(0., .012, dfy)) - .05 * (1. - smoothstep(0., .003, abs(dfy)));
+  }
+  c *= 1. + .05 * (q.x / hs.x) * -.5 + .03 * (q.y / hs.y);                                        // a little curl: light from the lamp
+  vec4 ik = texture(u_pages, auv);
+  c = mix(c, ik.rgb, ik.a * .95);""")
+SRC = SRC.replace("  float ink = texture(u_pages, auv).a;\n", "")
+# shadows fall away from the lamp
+SRC = SRC.replace("vec2 qs = rot(-g.z) * (p - g.xy - vec2(.006, -.009));",
+                  "vec2 qs = rot(-g.z) * (p - g.xy - SHD);")
+SRC = SRC.replace("vec3 PAPER, INK, CREAM, WAX, NIGHT;", "vec3 PAPER, INK, CREAM, WAX, NIGHT; vec2 SHD;")
+# the main: world camera, desk, lamp
+SRC = SRC.replace("""  vec2 p = (fc - .5 * u_res) / u_res.y + u_shake;
+  float px = 1. / u_res.y;""",
+"""  vec2 sp = (fc - .5 * u_res) / u_res.y + u_shake;
+  vec2 w = u_cam + vec2(sp.x, -sp.y) / (u_camz * K);                     // world, metres
+  vec2 p = vec2(w.x - LETC.x, -(w.y - LETC.y)) * K;                       // letter space
+  float px = 1. / (u_res.y * u_camz);
+  vec2 ld = normalize(w - LAMP + vec2(0., .3));
+  SHD = vec2(ld.x, -ld.y) * .012;""")
+SRC = SRC.replace("""  vec3 col = NIGHT * (1. + .05 * (fbm(fc * .05 / (u_res.y / 1080.)) - .5));
+  vec2 fr = abs(p) - vec2(.855, .47);
+  col = mix(col, srgb(200., 196., 186.), aa(abs(max(fr.x, fr.y)), px * 1.4) * .4);""",
+"""  // the desk: dark wood, three boards, drawn edges; the floor beyond
+  vec3 col;
+  float pxw = 1. / (u_res.y * u_camz * K);
+  bool onDesk = w.x > DESK.x && w.x < DESK.z && w.y > DESK.y && w.y < DESK.w;
+  if(onDesk){
+    float gr = fbm(vec2(w.x * 2.2, w.y * 70. + 3. * fbm(w * 4.)));
+    col = srgb(58., 45., 35.) * (.8 + .4 * gr);
+    float seam = min(abs(w.y - (DESK.y + (DESK.w - DESK.y) / 3.)), abs(w.y - (DESK.y + 2. * (DESK.w - DESK.y) / 3.)));
+    col *= 1. - .45 * (1. - smoothstep(0., pxw * 2., seam));
+  } else {
+    col = NIGHT * (1. + .1 * fbm(w * 30.));
+    col = mix(col, col * 1.5, (1. - smoothstep(0., pxw * 1.5, abs(fract(w.x * 7.) - .5) * .143)) * .5);
+  }
+  vec2 dq = max(DESK.xy - w, w - DESK.zw);
+  col = mix(col, srgb(232., 227., 214.), aa(abs(max(dq.x, dq.y)), pxw * 2.2) * .8);""")
+# the lamp's light over everything on the desk; the overlays; the lamp itself
+SRC = SRC.replace("""  if(leaving && Lt.a > 0.) col = Lt.rgb;
+  if(any(isnan(col))) col = NIGHT;""",
+"""  if(leaving && Lt.a > 0.) col = Lt.rgb;
+  // the letter when lifted: its own shadow grows away from it (drawn under it by darkening what it no longer covers)
+  vec4 over = texture(u_over, gl_FragCoord.xy / u_res);
+  col = mix(col, over.rgb, over.a * u_hasOver);
+  float dl = length((w - POOL) * vec2(1., 1.2));
+  float I = .28 + .82 * exp(-dl * dl / .2);
+  col *= I * mix(vec3(.75, .8, .92), vec3(1.02, .96, .86), clamp(I - .3, 0., 1.));
+  // the lamp: its shade seen from above, the bulb's glow inside
+  float lr = length(w - LAMP);
+  col = mix(col, srgb(24., 22., 20.), 1. - smoothstep(.13 - pxw, .13 + pxw, lr));
+  col = mix(col, srgb(232., 227., 214.), aa(abs(lr - .13), pxw * 2.) * .9);
+  col += vec3(1., .82, .55) * 1.4 * exp(-lr * lr / .0016) * step(lr, .13);
+  col = mix(col, srgb(232., 227., 214.), aa(abs(lr - .07), pxw * 1.5) * .5);
+  vec4 ui = texture(u_ui, gl_FragCoord.xy / u_res);
+  col = mix(col, ui.rgb, ui.a);
+  if(any(isnan(col))) col = NIGHT;""")
+# the letter lifted: a shadow on what lies under it
+SRC = SRC.replace("  vec4 Lt = letter(p, px);",
+"""  vec4 Lt = letter(p, px);
+  if(u_lift > 1.001){
+    vec2 so = SHD * (1. + 40. * (u_lift - 1.));
+    vec4 Ls = letter(p - so, px);
+    col *= 1. - Ls.a * (.45 - 2.5 * (u_lift - 1.));
+  }""")
+for a in ("u_pg[7]", "vec2 at = APEX"):
+    assert a in SRC, a
+
+
+def params(t):
+    P = S14E.params(t)
+    c, z = cam(t)
+    pos, lift, flip, _ = letter_state(t)
+    pg, pa = [], []
+    for i in range(7):
+        st = paper_state(i, t)
+        if st is None: pg.append((0., 0., 0., -9.)); pa.append(0.); continue
+        (cx, cy), ang, drop, alpha = st
+        pg.append((cx, cy, ang, drop)); pa.append(alpha)
+    P.update(u_pg=pg, u_pgA=pa, u_cam=c, u_camz=z, u_lift=lift, u_letW=pos, u_flip=flip, u_letX=0., u_zoom=1., u_dim=0.,
+             u_letY=P['u_letY'], u_hasOver=1. if t >= 171.3 else 0., u_envY=P['u_envY'] if t < 172.8 else -9.,
+             u_stock=[tuple(v / 255. for v in s[0]) for s in PAP.STOCK], u_age=[(s[1], float(s[2])) for s in PAP.STOCK])
+    return P
+
+
+# ---------------- hands (world metres, seen from above; palm down)
+SKIN, SLEEVE, CHALK = (158, 128, 108, 255), (50, 48, 47, 255), (232, 227, 214)
+
+
+def _cap(a, b, r, n=10):
+    """a capsule from a to b, radius r, as a polygon"""
+    dx, dy = b[0] - a[0], b[1] - a[1]; L = math.hypot(dx, dy) or 1e-6
+    ang = math.atan2(dy, dx)
+    pts = []
+    for i in range(n + 1):
+        th = ang - math.pi / 2 + math.pi * i / n
+        pts.append((b[0] + r * math.cos(th), b[1] + r * math.sin(th)))
+    for i in range(n + 1):
+        th = ang + math.pi / 2 + math.pi * i / n
+        pts.append((a[0] + r * math.cos(th), a[1] + r * math.sin(th)))
+    return pts
+
+
+def hand_shapes(wrist, ang, pose='flat', side='R'):
+    """palm and fingers as polygons.  ang: where the fingers point.  side: whose hand (thumb toward his middle)."""
+    f = (math.cos(ang), math.sin(ang)); r = (-math.sin(ang), math.cos(ang))
+    sg = -1 if side == 'R' else 1                     # the thumb's side (screen left for his right hand, fingers up)
+    P = lambda u, v: (wrist[0] + f[0] * u + r[0] * v, wrist[1] + f[1] * u + r[1] * v)
+    palm = [P(0, -.036), P(.02, -.043), P(.088, -.041), P(.094, 0), P(.088, .041), P(.02, .043), P(0, .036)]
+    fl = {'flat': [.078, .088, .082, .066], 'point': [.082, .028, .025, .022], 'grip': [.036, .038, .034, .03], 'pinch': [.06, .066, .062, .05]}[pose]
+    fingers = []
+    for k, (v, L) in enumerate(zip([-.029, -.0097, .0097, .029], fl)):
+        v = v * -sg                                   # index nearest the thumb
+        spread = .06 * (k - 1.5) * -sg if pose == 'flat' else 0.
+        a = P(.085, v); fa = ang + spread
+        b = (a[0] + math.cos(fa) * L, a[1] + math.sin(fa) * L)
+        fingers.append(_cap(a, b, .0095 if k < 3 else .0085))
+    ta = ang + sg * (.9 if pose != 'point' else .5)
+    t0 = P(.025, sg * .04)
+    thumb = _cap(t0, (t0[0] + math.cos(ta) * .05, t0[1] + math.sin(ta) * .05), .011)
+    return [palm] + fingers + [thumb]
+
+
+def arm_shape(shoulder, wrist):
+    dx, dy = wrist[0] - shoulder[0], wrist[1] - shoulder[1]; L = math.hypot(dx, dy) or 1e-6
+    nx, ny = -dy / L, dx / L
+    w0, w1 = .062, .04
+    return [(shoulder[0] + nx * w0, shoulder[1] + ny * w0), (wrist[0] + nx * w1, wrist[1] + ny * w1),
+            (wrist[0] - nx * w1, wrist[1] - ny * w1), (shoulder[0] - nx * w0, shoulder[1] - ny * w0)], (nx, ny)
+
+
+def draw_arm(v, sh, shoulder, wrist, ang, pose, side):
+    """sleeve, hand: filled on a layer of their own, one chalk outline round the whole; the fingers parted by darker lines"""
+    arm, (nx, ny) = arm_shape(shoulder, wrist)
+    hs = hand_shapes(wrist, ang, pose, side)
+    dxl, dyl = wrist[0] - LAMP[0], wrist[1] - LAMP[1]; L = math.hypot(dxl, dyl) or 1
+    o = (dxl / L * .03, dyl / L * .03)
+    for poly in [arm] + hs:                                              # shadow, away from the lamp
+        sh.polygon([tuple(c * sh_scale for c in v.P(x + o[0], y + o[1])) for x, y in poly], fill=(0, 0, 0, 160))
+    k = v.S.k
+    pts = [v.P(x, y) for poly in [arm] + hs for x, y in poly]
+    x0 = max(0, int(min(p[0] for p in pts) * k) - 12); y0 = max(0, int(min(p[1] for p in pts) * k) - 12)
+    x1 = min(v.S.img.width, int(max(p[0] for p in pts) * k) + 12); y1 = min(v.S.img.height, int(max(p[1] for p in pts) * k) + 12)
+    if x1 <= x0 or y1 <= y0: return
+    lay = Image.new('RGBA', (x1 - x0, y1 - y0), (0, 0, 0, 0)); d = ImageDraw.Draw(lay)
+    Q = lambda poly: [(v.P(x, y)[0] * k - x0, v.P(x, y)[1] * k - y0) for x, y in poly]
+    d.polygon(Q(arm), fill=SLEEVE)
+    for poly in hs: d.polygon(Q(poly), fill=SKIN)
+    lw = max(2, int(2.2 * k * v.lw))
+    for poly in hs[1:]: d.line(Q(poly) + [Q(poly)[0]], fill=(96, 76, 64, 255), width=max(1, lw // 2))   # between the fingers
+    cuff = [(wrist[0] + nx * .041, wrist[1] + ny * .041), (wrist[0] - nx * .041, wrist[1] - ny * .041)]
+    d.line(Q(cuff), fill=CHALK + (200,), width=lw)
+    A = lay.split()[3]
+    ring = ImageChops.subtract(A.filter(ImageFilter.MaxFilter(2 * (lw // 2) + 1)), A)
+    edge = Image.new('RGBA', lay.size, CHALK + (255,)); edge.putalpha(ring.point(lambda a: int(a * .9)))
+    lay.alpha_composite(edge)
+    v.S.img.alpha_composite(lay, (x0, y0))
+
+
+sh_scale = 1.
+
+
+# ---------------- what the hands do
+def finger_at(t):
+    """the fingertip on the rule book: down the left page; one page turned; straight to 爱"""
+    bx, by = G.BOOK_C; pw, ph = G.PG
+    def row(side, i): return (bx - pw + side * pw + .012, by - ph / 2 + G.ROW0 + i * G.ROWH + .026)
+    if t < TD + .02: return row(0, 0), False
+    if t < 173.84:
+        i = 8 * clamp((t - TD - .02) / (173.84 - TD - .02))
+        return (row(0, 0)[0], row(0, 0)[1] + i * G.ROWH), True
+    if t < 173.93: return row(1, 0), False                          # lifted: the page turns
+    if t < T_REACH:
+        i = 4 * ease((t - 173.93) / .08)
+        return (row(1, 0)[0], row(1, 0)[1] + i * G.ROWH), True
+    return None, False
+
+
+def right_hand(t):
+    """(wrist, angle, pose) of his right hand, or None"""
+    pos, lift, flip, lk = letter_state(t)
+    LWm = .2125 / 2
+    if t < 171.30: return None
+    if t < T_SET + .05:
+        # in to the letter's lower edge; holds it there while it is lifted and turned
+        a = ease((t - 171.30) / .45)
+        tip = (pos[0] + .01, pos[1] + .1485 * lift - .025)
+        ang = -math.pi / 2 + .3 * math.sin(math.pi * flip)
+        wr = (tip[0] - math.cos(ang) * .15, tip[1] - math.sin(ang) * .15)
+        return lerp2((2.1, 1.95), wr, a), ang, 'pinch'
+    if t < TD:
+        a = ease((t - T_SET - .05) / .3)
+        return lerp2((LET1[0] - LWm + .03, LET1[1] + .13), (2.05, 1.95), a), -math.pi / 2 - .2, 'flat'
+    tip, on = finger_at(t)
+    if tip is None:
+        if t < T_LAY + .1:
+            a = ease((t - T_REACH) / .12); b = ease((t - T_REACH - .14) / .14)
+            p0 = finger_at(T_REACH - .01)[0]
+            tip = (lerp(lerp(p0[0], G.FOLD0[0] - .05, a), G.FOLD1[0] + .02, b), lerp(lerp(p0[1], G.FOLD0[1], a), G.FOLD1[1] + .1, b))
+            return (tip[0] + .01, tip[1] + .1), -math.pi / 2 - .3 * a, 'grip'
+        b = ease((t - T_LAY - .1) / .25)
+        return lerp2((G.FOLD1[0] + .03, G.FOLD1[1] + .2), (2.25, 1.95), b), -math.pi / 2 - .3, 'flat'
+    a = ease((t - TD) / .12)
+    ang = -math.pi / 2 - .12
+    f = (math.cos(ang), math.sin(ang)); r = (-math.sin(ang), math.cos(ang)); vi = -.029
+    wr = (tip[0] - f[0] * .167 - r[0] * vi, tip[1] - f[1] * .167 - r[1] * vi)
+    return lerp2((2.05, 1.95), wr, a), ang, 'point'
+
+
+def left_hand(t):
+    if t < SW0 - .1: return None, None, None
+    if t < SW1 + .08:
+        a = sweep_angle(t)
+        L = .74
+        wr = (SHL[0] + math.cos(a) * L, SHL[1] + math.sin(a) * L)
+        return wr, a + .15, 'flat'
+    if t < T_BOOK:                                   # to the far edge for the book, drawing it in
+        a = ease((t - SW1 - .08) / .2)
+        bk = book_pos(t)
+        return lerp2((1.0, 1.55), (bk[0] - .2, bk[1] + .06), a), -math.pi / 2 + .5, 'flat'
+    a = ease((t - T_BOOK) / .3)
+    return lerp2((G.BOOK_C[0] - .38, G.BOOK_C[1] + .1), (1.55, 1.95), a), -math.pi / 2 + .3, 'flat'
+
+
+def book_pos(t):
+    return lerp2((G.BOOK_C[0], .72), G.BOOK_C, outc((t - 173.10) / .3))
+
+
+def shoulder_of(side, t):
+    lean = ease((t - SW0 + .1) / .15) * (1 - ease((t - SW1 - .1) / .25))
+    if side == 'L': return (lerp(MAN[0] - .2, SHL[0], lean), lerp(MAN[1] - .02, SHL[1], lean))
+    return (MAN[0] + .2, MAN[1] - .02)
+
+
+# ---------------- the overlay (lit: lies on the desk) and the ui (not lit)
+_FX = {}
+
+
+def _shelf(v):
+    x0, y0, x1, y1 = G.SHELF
+    v.rect(x0, y0, x1, y1, fill=(40, 36, 32, 255), w=1.2)
+    for i in range(6):
+        ya = y0 + i * (y1 - y0) / 6
+        if i: v.line([(x0, ya), (x1, ya)], w=.8)
+    for i in range(6):
+        ya = y0 + (i + .5) * (y1 - y0) / 6
+        v.text(x0 - .015, ya, f'C-{i + 1}', 'cour.ttf', .028, anchor='rm', a=200)
+
+
+def _folders(v, t):
+    x0, y0, x1, y1 = G.SHELF
+    for i in range(6):
+        if i == 2 and t >= T_REACH + .1: continue
+        ya = y0 + i * (y1 - y0) / 6
+        for j in range(5):
+            xx = x0 + .06 + j * .05
+            v.fill([(xx - .012, ya + .025), (xx + .012, ya + .025), (xx + .012, ya + (y1 - y0) / 6 - .025), (xx - .012, ya + (y1 - y0) / 6 - .025)], (196, 178, 140, 255))
+            v.line([(xx, ya + .025), (xx, ya + (y1 - y0) / 6 - .025)], w=.45, a=170, amp=.02)
+
+
+def overlay(t, w, h):
+    global sh_scale
+    c, z = cam(t)
+    v = G.V(w, h, (c[0], c[1], S0 * z), seed=93)
+    k = v.S.k
+    shl = Image.new('RGBA', (w // 2, h // 2), (0, 0, 0, 0)); sh = ImageDraw.Draw(shl)
+    sh_scale = (w / 2) / (v.Wt * 1.)                                   # 1080 units -> shadow-layer px
+    # the shelf and the book
+    if z < .9:
+        _shelf(v); _folders(v, t)
+    if t >= 173.10:
+        bx, by = book_pos(t)
+        if t < T_BOOK:                                                  # closed, coming in
+            v.rect(bx - G.PG[0] / 2 - .01, by - G.PG[1] / 2 - .01, bx + G.PG[0] / 2 + .01, by + G.PG[1] / 2 + .01, fill=(70, 30, 28, 255), w=1.2)
+            v.text(bx, by, 'RULES', 'COPRGTL.TTF', .03, anchor='mm', col=(214, 196, 150))
+        else:
+            G._book(v, t)
+    if t >= T_REACH + .1: G._file(v, t)
+    # the arms and hands (shadows under them)
+    rh = right_hand(t)
+    lh, la, lp = left_hand(t)
+    if lh is not None: draw_arm(v, sh, shoulder_of('L', t), lh, la, lp, 'L')
+    if rh is not None: draw_arm(v, sh, shoulder_of('R', t), rh[0], rh[1], rh[2], 'R')
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    img.alpha_composite(shl.filter(ImageFilter.GaussianBlur(6)).resize((w, h), Image.BILINEAR))
+    img.alpha_composite(v.S.result())
+    return img, v
+
+
+def ui(t, w, h, v):
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    if t >= T_LAY:
+        v2 = G.V(w, h, (v.cx, v.cy, v.sc), seed=94)
+        bx = G.detail(v2, img, t, sel=1. if CLICKS[0] <= t < T_SQ else 0.)
+        img.alpha_composite(v2.S.result())
+        if bx: G._panel(img, bx, t)
+    if t >= 174.45:
+        a = ease((t - 174.45) / .2)
+        Wt = w * 1080 / h
+        x = lerp(Wt + 20, Wt * .5 - 470, a) + 40 * math.sin(a * math.pi) ** 2
+        y = lerp(1100, 300, a) - 30 * math.sin(a * math.pi)
+        G.pointer(img, x, y, h / 1080)
+    return img
+
+
+_E = {}
+
+
+def letter_front():
+    """16 February 1930, to his mother: the verified sentence in his hand; the rest of the page handwriting texture"""
+    Wf, Hf = 1400, 1970
+    img = Image.new('RGBA', (Wf, Hf), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    r = random.Random(1930)
+    fh = PAP.font('Inkfree.ttf', 46)
+    d.text((Wf - 120, 130), '16. II. 1930', font=PAP.font('Inkfree.ttf', 50), fill=(255, 255, 255, 250), anchor='rm')
+    y = PAP.cursive(d, r, 120, 300, Wf - 240, 76, 6, xh=19, fill=(255, 255, 255, 170), w=3) - 50
+    y = PAP.wrap_real(d, 120, y + 6, 'I feel sure that I shall meet Morcom again somewhere & that there will be some work for us to do together',
+                      PAP.font('Inkfree.ttf', 58), Wf - 240, 88, fill=(255, 255, 255, 255))
+    PAP.cursive(d, r, 120, y + 50, Wf - 240, 76, 8, xh=19, fill=(255, 255, 255, 170), w=3)
+    img.putalpha(img.split()[3].filter(ImageFilter.GaussianBlur(.7)))
+    return img
+
+
+
+
+def textures(t, w, h):
+    if not _E:
+        _E.update(f=letter_front(), b=S14E._back(), p=PAP.atlas(), blank=Image.new('RGBA', (8, 8), (0, 0, 0, 0)))
+    T = {'u_front': _E['f'], 'u_back': _E['b'], 'u_pages': _E['p']}
+    if t >= 171.3:
+        ov, v = overlay(t, w, h)
+        T['u_over'] = ov; T['u_ui'] = ui(t, w, h, v)
+    else:
+        T['u_over'] = _E['blank']; T['u_ui'] = _E['blank']
+    return T

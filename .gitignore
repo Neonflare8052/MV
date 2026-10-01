@@ -1,0 +1,40 @@
+# --- not ours to redistribute: the original song, its lyrics, other creators' videos
+*.mp3
+*.lrc
+*.srt
+/42188997140-1-192.mp4
+/42250407906-1-192.mp4
+MV_storyboard_lyrics.md
+work/storyboard_initial.md
+
+# --- renders and other regenerable media
+*.mp4
+*.m4a
+*.wav
+*.mov
+**/stills/
+**/cache/
+claude/frames/
+output/
+work/
+tools/
+
+# --- build / run debris
+__pycache__/
+*.pyc
+*.log
+
+# --- review images (contact sheets, stills, previews): kept locally, not in the repo
+*.png
+*.jpg
+# ... except what the code reads as input
+!claude/film/assets/
+!claude/film/assets/*.png
+!claude/tests/t04_printer/atlas.png
+!claude/tests/t06_teletype/glyphs.png
+!opening_information_v1/base/tests/t06_teletype/glyphs.png
+!claude/tests/t13_tech_ladder/room_backdrop.png
+
+# --- render logs (contain local paths)
+verification.json
+render_manifest.json

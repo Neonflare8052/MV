@@ -1,0 +1,444 @@
+"""s13 · 2:27.66–2:42.63  twelve EXECUTIONs, six counts, EXECUTION.
+Lissitzky's "Beat the Whites with the Red Wedge", executed by a program stroke by stroke — the way the first computer
+art (Nake, Nees, Molnár) had plotters execute the avant-garde's geometry. It turns an execution into a clean composition.
+
+1–4   the plotter lays down construction lines in the character grid: the axis (the knife's angle), a compass circle
+      round the eye, the border of the black field with a ruler, the wedge's guides and a target mark on the gap.
+5–8   the page is printed row by row: the left side turns to paper, the right stays the terminal (the black field);
+      the circle fills white and the eye is ink on it, its gap ring red; black bars; EXECUTION stamped.
+9–12  the red wedge is printed toward the circle in four pushes; the eye turns its gap to face it; the 12th drives the
+      tip through the circle's edge into the gap. The pupil snaps shut.
+EIN..LIU  six numerals in six languages slam onto the poster; the Frankenstein line is typed along the wedge's edge.
+EXECUTION  the wedge drives at the camera — red — freeze, dropped frames — black."""
+import math
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+import importlib.util
+
+_P = Path(__file__).resolve().parent / 's12_exe.py'
+_spec = importlib.util.spec_from_file_location('s12src', _P); S12 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(S12)
+T7 = S12.T7
+CH = T7.CHARS
+G_DASH, G_BAR, G_SL, G_BS = CH.index('-'), CH.index('|'), CH.index('/'), CH.index(chr(92))
+
+E = [147.660, 148.600, 149.520, 150.540, 151.520, 152.280, 153.160, 153.980, 155.200, 156.080, 157.040, 158.000]
+C = [158.900, 159.321, 159.657, 160.244, 160.693, 161.124]
+X, END = 161.584, 162.632
+
+# poster geometry (the eye / white circle at the origin; the axis is the knife's angle from DISHEARTENED)
+AX = (0.94386, -0.33035); NN = (0.33035, 0.94386)
+R0, KW = .52, .17
+IRIS_S = .1                     # the eye turns toward the wedge: iris moved along -AX (eye units)
+TF = -(IRIS_S * .47 + .3 * .47)  # tip target, along the axis: the middle of the iris gap
+TIPS = [-1.95, -1.3, -.66, TF]
+P0, DB = (-.78, 0.), (0.17910, 0.98387)
+
+def pt(s, w=0.): return (AX[0] * s + NN[0] * w, AX[1] * s + NN[1] * w)
+SEGS = [pt(-3.0), pt(1.7),                                           # 0 the axis
+        (-.035, 0.), (.035, 0.),                                     # 1 centre mark
+        (0., -.035), (0., .035),                                     # 2
+        (P0[0] - DB[0] * 1.5, P0[1] - DB[1] * 1.5), (P0[0] + DB[0] * 1.5, P0[1] + DB[1] * 1.5),   # 3 border
+        pt(TF), pt(-3.0, KW * (TF + 3.0)),                           # 4 wedge guides
+        pt(TF), pt(-3.0, -KW * (TF + 3.0))]                          # 5
+
+# numerals: text, font, centre, angle (deg), letter height, colour (0 black, 1 red, 2 paper)
+NUMS = [('EIN', 'impact.ttf', (-1.5, -.5), -19.3, .26, 0),
+        ('DOS', 'impact.ttf', (-1.85, .08), 0., .2, 1),
+        ('TROIS', 'impact.ttf', (-2.12, -.32), 90., .14, 0),
+        ('넷', 'malgunbd.ttf', (.34, -.6), -8., .22, 2),
+        ('FEM', 'impact.ttf', (.62, .64), 12., .18, 1),
+        ('六', 'msyhbd.ttc', (.78, .06), 0., .38, 1)]
+WORD = ('EXECUTION', (-.98, -.16), 79.5, .085)
+INSC = 'IF I CANNOT INSPIRE LOVE, I WILL CAUSE FEAR'
+
+
+def _row(text, font, H=256, pad=10):
+    f = ImageFont.truetype('C:/Windows/Fonts/' + font, int(H * 1.1))
+    b = f.getbbox(text)
+    s = (H - 2 * pad) / (b[3] - b[1])
+    f = ImageFont.truetype('C:/Windows/Fonts/' + font, max(8, int(H * 1.1 * s)))
+    b = f.getbbox(text)
+    img = Image.new('L', (b[2] - b[0] + 2 * pad, H), 0)
+    ImageDraw.Draw(img).text((pad - b[0], pad - b[1]), text, font=f, fill=255)
+    return img
+
+
+def _build():
+    rows = [_row(t, f) for t, f, *_ in NUMS]
+    W = 1024
+    at = Image.new('RGBA', (W, 256 * len(rows)), (255, 255, 255, 0))
+    asp = []
+    for k, r in enumerate(rows):
+        at.paste(Image.merge('RGBA', (r, r, r, r)), (0, 256 * k)); asp.append(r.size[0] / 256)
+    word = _row(WORD[0], 'impact.ttf')
+    ins = _row(INSC, 'impact.ttf', H=128, pad=6)
+    # each character's right edge, for the typed reveal
+    f = ImageFont.truetype('C:/Windows/Fonts/impact.ttf', 10)
+    edges = []
+    tot = f.getlength(INSC)
+    for i in range(1, len(INSC) + 1): edges.append(f.getlength(INSC[:i]) / tot)
+    rgba = lambda r: Image.merge('RGBA', (r, r, r, r))
+    return at, asp, rgba(word), word.size[0] / 256, rgba(ins), ins.size[0] / 128, edges
+
+
+ATLAS, ASP, WORD_IMG, WORD_ASP, INSC_IMG, INSC_ASP, INSC_EDGES = _build()
+
+_src7 = S12.EYE_GLSL
+
+
+def _v(p): return 'vec2(%.5f,%.5f)' % p
+
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform vec2 u_iris; uniform float u_gapA, u_lid, u_pupil;
+uniform sampler2D u_glyphs, u_nums, u_word, u_insc;
+uniform float u_clk, u_red, u_garb;
+uniform float u_zoom, u_ang; uniform vec2 u_ctr, u_shake;
+uniform float u_seg[6];
+uniform float u_circ, u_tick, u_target;
+uniform vec3 u_head;
+uniform float u_scanA, u_scanC, u_scanB, u_wordA;
+uniform float u_tip, u_push, u_crack, u_hot;
+uniform float u_num[6];
+uniform float u_insX;
+uniform float u_black;
+out vec4 fragColor;
+#define PI 3.14159265
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.03+1.7; a*=.5; } return s; }
+''' + _src7 + r'''
+const vec2 AX=vec2(.94386,-.33035), NN=vec2(.33035,.94386);
+const float R0=%R0%, KW=%KW%, RH=.0123;
+const vec2 P0=%P0%, DB=%DB%, NB=vec2(%DB1%,-%DB0%);
+const vec2 SA[6]=vec2[6](%SA%), SB[6]=vec2[6](%SB%);
+const float G_DASH=%GD%., G_BAR=%GB%., G_SL=%GS%., G_BS=%GK%.;
+const float ASP[6]=float[6](%ASP%);
+const vec2 NC[6]=vec2[6](%NC%);
+const float NA[6]=float[6](%NA%), NH[6]=float[6](%NH%), NK[6]=float[6](%NK%);
+const vec3 PAPER=vec3(.62,.56,.47), INK=vec3(.012,.011,.012), RED=vec3(.9,.06,.035);
+float PXq;
+
+vec2 seg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-9),0.,1.); return vec2(length(pa-ba*h),h); }
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,s,-s,c); }
+
+// construction strokes drawn so far: (distance, direction angle)
+vec2 strokes(vec2 q){
+  vec2 best=vec2(1e3,0.);
+  for(int i=0;i<6;i++){
+    if(u_seg[i]<=0.) continue;
+    vec2 b=mix(SA[i],SB[i],u_seg[i]);
+    float d=seg(q,SA[i],b).x;
+    if(d<best.x) best=vec2(d,atan(SB[i].y-SA[i].y,SB[i].x-SA[i].x));
+  }
+  if(u_circ>0.){
+    float a=atan(q.y,q.x), a0=atan(-AX.y,-AX.x);
+    float rel=mod(a-a0,2.*PI);
+    if(rel<u_circ*2.*PI){ float d=abs(length(q)-R0); if(d<best.x) best=vec2(d,a+PI*.5); }
+  }
+  return best;
+}
+float glyphFor(float ang){
+  float t=mod(ang,PI);
+  if(t<PI/8.||t>7.*PI/8.) return G_DASH;
+  if(t<3.*PI/8.) return G_SL;
+  if(t<5.*PI/8.) return G_BAR;
+  return G_BS;
+}
+// raster fill: row r (from the top), position along the row xf in 0..1, progress in rows
+float scan(float r, float xf, float prog){ return step(r+xf,prog); }
+float paperAt(vec2 q){
+  float side=1.-smoothstep(-PXq,PXq,dot(q-P0,NB));
+  float r=floor((1.8-q.y)/RH), xf=clamp((q.x+3.)/4.8,0.,1.);
+  return scan(r,xf,u_scanA)*side;
+}
+float circleAt(vec2 q){
+  float edge=1.-smoothstep(-PXq,PXq,length(q)-R0);
+  float r=floor((R0-q.y)/RH), xf=(q.x+R0)/(2.*R0);
+  return scan(r,xf,u_scanC)*edge;
+}
+// printed shapes: black bars and a red square. (centre, half size, angle, red?)
+float box(vec2 q, vec2 c, vec2 hs, float a, out float rowFill){
+  vec2 l=rot(-a)*(q-c);
+  vec2 d=abs(l)-hs;
+  float sd=length(max(d,0.))+min(max(d.x,d.y),0.);
+  float r=floor((hs.y-l.y)/.004), xf=(l.x+hs.x)/(2.*hs.x);
+  rowFill=scan(r,xf,u_scanB*(2.*hs.y/.004+1.));
+  return 1.-smoothstep(-PXq,PXq,sd);
+}
+float wedge(vec2 q){
+  if(u_tip<-9.) return 0.;
+  float s=dot(q,AX)-u_push, w=dot(q,NN);
+  float sd=(abs(w)-KW*(u_tip-s))/sqrt(1.+KW*KW);
+  return 1.-smoothstep(-PXq,PXq,sd);
+}
+float stamp(sampler2D tx, vec2 q, vec2 c, float ang, float H, float asp, float rows, float row, float reveal){
+  vec2 l=rot(-ang)*(q-c)/H;
+  if(abs(l.y)>.5||abs(l.x)>asp*.5) return 0.;
+  if(l.x+asp*.5>reveal*asp) return 0.;
+  vec2 tex=vec2((l.x+asp*.5)*256./float(textureSize(tx,0).x)*float(textureSize(tx,0).y)/rows/256.,
+                1.-(row+1.)/rows+(l.y+.5)/rows);
+  return texture(tx,tex).a;
+}
+
+vec3 poster(vec2 q){
+  // the character grid (shared with the eye field of the previous shot)
+  vec2 cell=vec2(1.72/COLS,.96/ROWS);
+  LOD=max(log2(48./(cell.x*u_res.y*u_zoom)),0.);
+  vec2 g=(q+vec2(.86,-.48))/cell*vec2(1.,-1.);
+  float col=floor(g.x), row=floor(g.y);
+  vec2 f=vec2(fract(g.x),1.-fract(g.y));
+  vec2 cc=vec2((col+.5)*cell.x-.86,.48-(row+.5)*cell.y);
+
+  float pap=paperAt(q), circ=circleAt(q), cpap=max(paperAt(cc),circleAt(cc)), onCirc=circleAt(cc);
+  float grain=.9+.14*fbm(q*3.)+.05*(vn(q*380.)-.5);
+  vec3 paper=PAPER*grain;
+  vec3 c=vec3(.006);
+  // the terminal: garbage, first all red '!'
+  vec2 ek=eye(cc);
+  if(ek.y<.5&&cpap<.5){
+    float rate=4.+20.*h12(vec2(col,row)*.7);
+    float tick=floor(u_clk*rate+h12(vec2(row,col))*9.);
+    float gl=NR+floor(h12(vec2(col,row)+tick*.173)*NJ);
+    float patch=vn(cc*6.+vec2(u_clk*.3,0.));
+    float ink=(.06+.17*patch*patch+.3*step(.985,h12(vec2(col,row)+tick)))*u_garb;
+    vec3 cg=vec3(.62,.66,.62);
+    if(h12(vec2(col,row)*1.31+.7)<u_red){ gl=EXCL; ink=.55+.45*step(.5,fract(u_clk*9.+h12(vec2(row,col)))); cg=vec3(1.,.16,.12); }
+    c+=cg*ink*glyphMask(gl,f);
+  }
+  c=mix(c,paper,max(pap,circ));
+  // printing head: the row being printed glows
+  // construction: a hairline and its rasterisation into characters
+  vec2 sp=strokes(q), sc=strokes(cc);
+  float hair=1.-smoothstep(.0006,.0006+1.3*PXq,sp.x);
+  float chr=step(sc.x,cell.y*.42)*glyphMask(glyphFor(sc.y),f);
+  float tk=0.;
+  if(u_tick>0.){
+    float sa=dot(q,AX), sn=dot(q,NN);
+    float idx=floor(sa/.06+.5); float s0=idx*.06;
+    float len_=mod(idx,5.)==0.?.03:.014;
+    if(s0>-2.6&&s0<-R0&&(s0+2.6)/(2.6-R0)<u_tick) tk=1.-smoothstep(.0005,.0005+1.3*PXq,seg(vec2(sa,sn),vec2(s0,0.),vec2(s0,-len_)).x);
+  }
+  float tg=0.;
+  if(u_target>0.){
+    vec2 tq=q-AX*%TF%;
+    tg=1.-smoothstep(.0005,.0005+1.3*PXq,abs(length(tq)-.03));
+    tg=max(tg,(1.-smoothstep(.0005,.0005+1.3*PXq,min(abs(tq.x),abs(tq.y))))*step(length(tq),.055)*step(.015,length(tq)));
+    tg*=u_target;
+  }
+  float line=max(max(hair,tk),tg);
+  vec3 lightInk=vec3(.9,.92,.9);
+  c=mix(c+lightInk*(line*.9+chr*.55),mix(c,vec3(.05,.05,.06),min(line*.55+chr*.35,1.)),cpap);
+  // printed shapes
+  float rf0,rf1,rf2;
+  float b0=box(q,vec2(-1.5,-.02),vec2(.62,.032),radians(58.),rf0);
+  float b1=box(q,vec2(-1.3,-.64),vec2(.48,.012),radians(-19.3),rf1);
+  float b2=box(q,vec2(-1.72,.42),vec2(.065,.065),radians(21.),rf2);
+  c=mix(c,INK,b0*rf0); c=mix(c,INK,b1*rf1); c=mix(c,RED*grain,b2*rf2);
+  if(u_wordA>0.){
+    float w=stamp(u_word,q,%WC%,radians(%WA%),%WH%*(1.+.35*exp(-u_wordA*30.)),%WASP%,1.,0.,1.);
+    c=mix(c,INK,w*(.88+.12*fbm(q*60.))*step(0.,u_wordA));
+  }
+  // the eye: ink on the white circle, light on the terminal; the gap ring red on paper
+  if(ek.y>=.5){
+    float d=ek.x, gl;
+    if(ek.y<1.5){ float jit=h12(vec2(col,row)+floor(u_clk*3.)*.37); gl=clamp(floor(d*9.+(jit-.5)*.9),0.,9.); }
+    else gl=NR+(cc.x<-.08?%SLB%.:(cc.x>.08?%SLF%.:%SLP%.));
+    float ink=(ek.y<1.5?.15+.85*pow(d,1.1):d)*glyphMask(gl,f);
+    vec2 iq=(cc-u_iris*.47)/.47; float ir=length(iq), ia=atan(iq.y,iq.x);
+    float gapd=abs(mod(ia-u_gapA+PI,2.*PI)-PI);
+    float ring=(1.-smoothstep(.03,.05,abs(ir-.3)))*step(radians(27.),gapd)*step(.5,ek.y)*step(ek.y,1.5);
+    vec3 onPaper=mix(c,mix(INK,RED,ring),min(ink*(1.9+1.2*ring),1.));
+    vec3 onTerm=c+vec3(.92,.93,.9)*ink;
+    c=mix(onTerm,onPaper,onCirc);
+  }
+  // the red wedge; faint raster lines across it
+  float wd=wedge(q);
+  if(wd>0.){
+    float s=dot(q,AX)-u_push;
+    float hl=1.-.07*(1.-smoothstep(.0,1.5*PXq,abs(fract(s/.0123)-.5)*.0123-.0005));
+    vec3 rc=RED*(.92+.1*fbm(q*25.))*hl;
+    rc+=vec3(1.,.5,.3)*u_hot*exp(-max(u_tip-s,0.)*18.);     // the tip hot while it moves
+    c=mix(c,rc,wd);
+  }
+  // the circle cracks where the wedge went in
+  if(u_crack>0.){
+    vec2 ep=-AX*R0;
+    for(int k=0;k<7;k++){
+      float fk=float(k);
+      float an=atan(AX.y,AX.x)+(h12(vec2(fk,2.))-.5)*2.6;
+      vec2 dr=vec2(cos(an),sin(an)), pr=vec2(-dr.y,dr.x);
+      float along=dot(q-ep,dr), perp=dot(q-ep,pr)+.008*(vn(vec2(along*45.,fk*7.))-.5);
+      float L=(.08+.26*h12(vec2(fk,5.)))*u_crack;
+      float ln=(1.-smoothstep(.0007,.0007+1.3*PXq,abs(perp)))*step(0.,along)*step(along,L);
+      c=mix(c,INK,ln*.9*(1.-wd));
+    }
+  }
+  // the inscription along the wedge's upper edge
+  if(u_insX>0.){
+    vec2 ed=normalize(AX-NN*KW);
+    vec2 base=AX*(-1.6)+NN*(KW*(u_tip+1.6)+.03);
+    vec2 cen=base+ed*(%IASP%*.052*.5);
+    c=mix(c,INK,stamp(u_insc,q,cen,atan(ed.y,ed.x),.052,%IASP%,1.,0.,u_insX));
+  }
+  // six numerals
+  for(int k=0;k<6;k++){
+    if(u_num[k]<0.) continue;
+    float sc_=1.+.55*exp(-u_num[k]*32.);
+    float a=stamp(u_nums,q,NC[k],radians(NA[k]),NH[k]*sc_,ASP[k],6.,float(k),1.);
+    vec3 kc=NK[k]<.5?INK:(NK[k]<1.5?RED*grain:PAPER*grain);
+    c=mix(c,kc,a*(.9+.1*fbm(q*50.+float(k))));
+  }
+  // the plotter / print head
+  if(u_head.z>0.){ float l=length(q-u_head.xy); c+=vec3(1.,.95,.88)*u_head.z*(exp(-l*u_zoom*700.)*3.+exp(-l*u_zoom*70.)*.25); }
+  return c;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  PXq=1./(u_res.y*u_zoom);
+  vec2 q=u_ctr+rot(u_ang)*(uv+u_shake)/u_zoom;
+  vec3 c=poster(q);
+  c*=1.-u_black;
+  fragColor=vec4(c*u_weight,1.);
+}
+'''
+_rep = {
+    '%R0%': '%.4f' % R0, '%KW%': '%.4f' % KW, '%P0%': _v(P0), '%DB%': _v(DB), '%DB0%': '%.5f' % DB[0], '%DB1%': '%.5f' % DB[1],
+    '%SA%': ','.join(_v(SEGS[2 * i]) for i in range(6)), '%SB%': ','.join(_v(SEGS[2 * i + 1]) for i in range(6)),
+    '%GD%': str(G_DASH), '%GB%': str(G_BAR), '%GS%': str(G_SL), '%GK%': str(G_BS),
+    '%ASP%': ','.join('%.4f' % a for a in ASP), '%NC%': ','.join(_v(n[2]) for n in NUMS),
+    '%NA%': ','.join('%.2f' % n[3] for n in NUMS), '%NH%': ','.join('%.3f' % n[4] for n in NUMS),
+    '%NK%': ','.join('%d.' % n[5] for n in NUMS),
+    '%TF%': '%.5f' % TF, '%WC%': _v(WORD[1]), '%WA%': '%.2f' % WORD[2], '%WH%': '%.3f' % WORD[3], '%WASP%': '%.4f' % WORD_ASP,
+    '%IASP%': '%.4f' % INSC_ASP,
+    '%SLB%': str(T7.JUNK.index(chr(92)) + 10), '%SLF%': str(T7.JUNK.index('/') + 10), '%SLP%': str(T7.JUNK.index('|') + 10),
+}
+for k, v in _rep.items(): SRC = SRC.replace(k, v)
+POST = dict(u_bloom=.28, u_ca=.004)
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def lerp(a, b, k): return a + (b - a) * k
+
+
+def camera(t):
+    """four set-ups: frontal on the eye; the page, tilted; close on the wedge and the circle; the whole poster"""
+    if t < E[4]:
+        k = ease((t - E[0]) / 3.8)
+        return 1. - .08 * k, 0., (-.1 * k, .03 * k)
+    if t < E[8]:
+        k = (t - E[4]) / (E[8] - E[4])
+        return .6 + .04 * k, math.radians(-8. - 1.5 * k), (-.62 + .04 * k, 0.)
+    if t < C[0]:
+        k = ease((t - E[8]) / (C[0] - E[8]))
+        c = lerp(1.3, .45, k)
+        return .95 + .3 * k, math.radians(15.7), (-AX[0] * c, -AX[1] * c)
+    k = (t - C[0]) / (X - C[0])
+    z = .5 + .04 * k + .1 * ease((t - C[5]) / (X - C[5]))
+    return z, math.radians(5. - 2. * k), (-.5 + .25 * ease((t - C[5]) / (X - C[5])), .0)
+
+
+def shake(t):
+    x = y = 0.
+    for i, t0 in enumerate(E[8:] + C):
+        a = t - t0
+        if 0 <= a < .3:
+            e = math.exp(-a * 22) * (.012 if i < 4 else .009)
+            x += e * math.sin(a * 90 + i); y += e * math.cos(a * 77 + 2 * i)
+    return x, y
+
+
+def look(t):
+    """staring at you (as the eye was left); at the 9th EXECUTION it turns to the wedge"""
+    k = outc((t - E[8]) / .07)
+    live = 1.
+    x = -AX[0] * IRIS_S * k + .006 * math.sin(t * 13.) * live * (1 - k)
+    y = -AX[1] * IRIS_S * k + .005 * math.sin(t * 9.1) * live * (1 - k)
+    return x, y
+
+
+def gap(t):
+    down, face = math.radians(-90.), math.atan2(-AX[1], -AX[0])
+    d = ((face - down + math.pi) % (2 * math.pi)) - math.pi
+    return down + d * ease((t - E[8] + .02) / .14)
+
+
+def draw(t, t0, dur): return clamp((t - t0) / dur) if t >= t0 else 0.
+
+
+def params(t):
+    # the freeze after the last EXECUTION: frames held, a few dropped
+    te = t
+    if X + .09 <= t < X + .3:
+        te = X + .09 + (.012 if t > X + .17 else 0.) + (.01 if t > X + .24 else 0.)
+    t = te
+    zoom, ang, ctr = camera(t)
+    # the final push: into the red
+    if t >= X:
+        k = ease((t - X) / .1)
+        zoom *= math.exp(math.log(16.) * k)
+        ctr = (lerp(ctr[0], -AX[0] * .5, k), lerp(ctr[1], -AX[1] * .5, k))
+    sx, sy = shake(t)
+    ix, iy = look(t)
+    # the tip: pushed in four steps
+    tip = -99.
+    hot = 0.
+    for i, s in enumerate(TIPS):
+        t0 = E[8 + i]
+        if t >= t0:
+            prev = TIPS[i - 1] if i else -3.4
+            k = outc((t - t0) / .11)
+            tip = lerp(prev, s, k)
+            hot = max(0., 1 - (t - t0) / .25)
+    # the plotter head: where the stroke being drawn is
+    head = (0., 0., 0.)
+    segp = [draw(t, E[0], .3), draw(t, E[1] + .02, .08), draw(t, E[1] + .06, .08), draw(t, E[2], .3),
+            draw(t, E[3], .28), draw(t, E[3] + .08, .28)]
+    circ = draw(t, E[1], .36)
+    for i, (t0, dur) in enumerate([(E[0], .3), (E[2], .3), (E[3], .28)]):
+        if t0 <= t < t0 + dur + .06:
+            j = [0, 3, 4][i]; k = clamp((t - t0) / dur)
+            a, b = SEGS[2 * j], SEGS[2 * j + 1]
+            head = (lerp(a[0], b[0], k), lerp(a[1], b[1], k), 1. - clamp((t - t0 - dur) / .06))
+    if E[1] <= t < E[1] + .42:
+        k = clamp((t - E[1]) / .36); a0 = math.atan2(-AX[1], -AX[0]) + k * 2 * math.pi
+        head = (R0 * math.cos(a0), R0 * math.sin(a0), 1. - clamp((t - E[1] - .36) / .06))
+    # raster fills (progress in rows)
+    NA_ = 3.6 / .0123 + 1
+    scanA = NA_ * outc((t - E[4]) / .42) if t >= E[4] else 0.
+    NC_ = 2 * R0 / .0123 + 1
+    scanC = NC_ * outc((t - E[5]) / .34) if t >= E[5] else 0.
+    if E[4] <= t < E[4] + .46:
+        r = math.floor(scanA); xf = scanA - r
+        head = (-3. + 4.8 * xf, 1.8 - (r + .5) * .0123, .8)
+    if E[5] <= t < E[5] + .38:
+        r = math.floor(scanC); xf = scanC - r
+        head = (-R0 + 2 * R0 * xf, R0 - (r + .5) * .0123, .8)
+    scanB = outc((t - E[6]) / .3) if t >= E[6] else 0.
+    # the inscription: typed across the six counts
+    n = int(len(INSC) * clamp((t - C[0]) / (C[5] + .15 - C[0])))
+    insX = INSC_EDGES[n - 1] if n > 0 else 0.
+    pupil = .22
+    if t >= E[11]: pupil = lerp(.22, .055, outc((t - E[11] - .03) / .06))
+    return dict(u_clk=t, u_red=1. - ease((t - E[0] - .2) / .5) * .6 - .4 * ease((t - E[4]) / .3),
+                u_garb=1. - .35 * ease((t - E[4]) / .5),
+                u_zoom=zoom, u_ang=ang, u_ctr=ctr, u_shake=(sx, sy),
+                u_seg=segp, u_circ=circ, u_tick=draw(t, E[2] + .1, .3), u_target=draw(t, E[3] + .2, .1),
+                u_head=head, u_scanA=scanA, u_scanC=scanC, u_scanB=scanB, u_wordA=(t - E[7]) if t >= E[7] else -1.,
+                u_tip=tip, u_push=(.9 * ease((t - X) / .12) if t >= X else 0.), u_crack=outc((t - E[11] - .02) / .08) if t >= E[11] else 0.,
+                u_hot=hot, u_num=[(t - c) if t >= c else -1. for c in C], u_insX=insX,
+                u_black=1. if t >= X + .3 else 0.,
+                u_iris=(ix, iy), u_gapA=gap(t), u_lid=1., u_pupil=pupil)
+
+
+_G = {}
+
+
+def textures(t, w, h):
+    if 'g' not in _G: _G['g'] = T7.atlas()
+    return {'u_glyphs': _G['g'], 'u_nums': ATLAS, 'u_word': WORD_IMG, 'u_insc': INSC_IMG}

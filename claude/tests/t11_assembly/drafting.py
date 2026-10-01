@@ -1,0 +1,561 @@
+"""The drawing sheet around the machine: border and zones, the Engine as it was meant (margin sketches),
+Babbage's and Lovelace's words, references, scale, dimensions and leaders onto the machine, the title block.
+Everything by hand: strokes wobble, ink varies; drawn at 2x and reduced.
+
+Coordinates are given in 1080p units (y down); the camera maps machine points into the same space.
+The machine's layout coordinates are mirrored in x on the sheet (see M() in scene.glsl)."""
+import math, random
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+F = 'C:/Windows/Fonts/'
+SEPIA = (62, 42, 26)
+FADED = (98, 72, 50)
+PENCIL = (112, 108, 102)
+RED = (188, 28, 34)
+
+QUOTES = dict(
+    steam=('I wish to God these calculations had been executed by steam!', 'C. B., 1821'),
+    guide=('As soon as an Analytical Engine exists, it will necessarily guide the future course of the science.',
+           'Passages from the Life of a Philosopher, 1864'),
+    wrong=('Pray, Mr. Babbage, if you put into the machine wrong figures, will the right answers come out?',
+           'Passages from the Life of a Philosopher, 1864'),
+    order=('It can do whatever we know how to order it to perform.', 'A. A. L., Note G, 1843'),
+)
+
+
+class Sheet:
+    def __init__(self, w, h, seed=7):
+        self.w, self.h = w, h
+        self.k = 2 * h / 1080                      # 1080p units -> supersampled pixels
+        self.img = Image.new('RGBA', (2 * w, 2 * h), (0, 0, 0, 0))
+        self.d = ImageDraw.Draw(self.img)
+        self.rng = random.Random(seed)
+        self.fonts = {}
+
+    def font(self, name, size):
+        key = (name, size)
+        if key not in self.fonts: self.fonts[key] = ImageFont.truetype(F + name, max(1, int(size * self.k)))
+        return self.fonts[key]
+
+    # ---- strokes
+    def _wob(self, pts, amp):
+        """Resample a polyline every few units and push it sideways by a slow, seeded wobble."""
+        r = self.rng
+        ph = [r.uniform(0, 6.28) for _ in range(3)]; fr = [r.uniform(.02, .04), r.uniform(.07, .11), r.uniform(.2, .3)]
+        out, L = [], 0.
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            dx, dy = x1 - x0, y1 - y0; ln = math.hypot(dx, dy) or 1e-6
+            nx, ny = -dy / ln, dx / ln
+            n = max(1, int(ln / 5))
+            for i in range(n + (1 if (x1, y1) == pts[-1] else 0)):
+                a = i / n; l = L + a * ln
+                o = amp * (math.sin(l * fr[0] + ph[0]) + .5 * math.sin(l * fr[1] + ph[1]) + .15 * math.sin(l * fr[2] + ph[2]))
+                out.append((x0 + dx * a + nx * o, y0 + dy * a + ny * o, l))
+            L += ln
+        return out
+
+    def line(self, pts, w=1.2, col=SEPIA, alpha=235, amp=.7, dash=None):
+        k = self.k
+        q = self._wob(pts, amp)
+        for (x0, y0, l0), (x1, y1, l1) in zip(q, q[1:]):
+            if dash and (l0 % sum(dash)) > dash[0]: continue
+            ww = w * (.8 + .4 * self.rng.random())
+            self.d.line([(x0 * k, y0 * k), (x1 * k, y1 * k)], fill=col + (alpha,), width=max(1, round(ww * k)))
+
+    def poly(self, pts, **kw): self.line(list(pts) + [pts[0]], **kw)
+
+    def ellipse(self, cx, cy, rx, ry, n=48, a0=0., a1=2 * math.pi, **kw):
+        self.line([(cx + rx * math.cos(a0 + (a1 - a0) * i / n), cy + ry * math.sin(a0 + (a1 - a0) * i / n)) for i in range(n + 1)], **kw)
+
+    def dot(self, x, y, r=1.4, col=SEPIA, alpha=230):
+        k = self.k
+        self.d.ellipse([(x - r) * k, (y - r) * k, (x + r) * k, (y + r) * k], fill=col + (alpha,))
+
+    def text(self, x, y, s, font, size, col=SEPIA, alpha=235, angle=0., anchor='la'):
+        f = self.font(font, size)
+        if abs(angle) < 1e-3:
+            self.d.text((x * self.k, y * self.k), s, font=f, fill=col + (alpha,), anchor=anchor); return
+        x0, y0, x1, y1 = self.d.textbbox((0, 0), s, font=f, anchor=anchor)
+        lay = Image.new('RGBA', (int(x1 - x0) + 8, int(y1 - y0) + 8), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).text((4 - x0, 4 - y0), s, font=f, fill=col + (alpha,), anchor=anchor)
+        lay = lay.rotate(angle, resample=Image.BICUBIC, expand=True)
+        self.img.alpha_composite(lay, (int(x * self.k + x0 - 4), int(y * self.k + y0 - 4)))
+
+    def math(self, x, y, s, font, size, col=SEPIA):
+        """'^1V_2' -> a small raised 1, V, a small lowered 2."""
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c in '^_' :
+                j = i + 1
+                while j < len(s) and s[j].isdigit(): j += 1
+                sub = s[i + 1:j]; sz = size * .62
+                self.text(x, y + (-size * .12 if c == '^' else size * .42), sub, font, sz, col=col)
+                x += self.textw(sub, font, sz) + 1; i = j; continue
+            self.text(x, y, c, font, size, col=col); x += self.textw(c, font, size) + (size * .25 if c == ' ' else 0); i += 1
+
+    def textw(self, s, font, size):
+        f = self.font(font, size); x0, _, x1, _ = self.d.textbbox((0, 0), s, font=f); return (x1 - x0) / self.k
+
+    def para(self, x, y, s, font, size, width, lead=1.25, **kw):
+        words, lines, cur = s.split(), [], ''
+        for wd in words:
+            t = (cur + ' ' + wd).strip()
+            if self.textw(t, font, size) > width and cur: lines.append(cur); cur = wd
+            else: cur = t
+        lines.append(cur)
+        for i, ln in enumerate(lines): self.text(x, y + i * size * lead, ln, font, size, **kw)
+        return y + len(lines) * size * lead
+
+    def arrow(self, x0, y0, x1, y1, col=SEPIA, w=.9):
+        a = math.atan2(y1 - y0, x1 - x0)
+        for s in (-1, 1):
+            self.line([(x1, y1), (x1 - 9 * math.cos(a + s * .28), y1 - 9 * math.sin(a + s * .28))], w=w, col=col, amp=.1)
+
+    def dim(self, p0, p1, off, label, size=17):
+        """A dimension line between two points on the machine, pushed off by `off` (perpendicular), with extension lines."""
+        (x0, y0), (x1, y1) = p0, p1
+        dx, dy = x1 - x0, y1 - y0; ln = math.hypot(dx, dy); nx, ny = -dy / ln * off, dx / ln * off
+        a0, a1 = (x0 + nx, y0 + ny), (x1 + nx, y1 + ny)
+        ex = 1 + 8 / abs(off)
+        self.line([(x0 + nx * .15, y0 + ny * .15), (x0 + nx * ex, y0 + ny * ex)], w=.6, col=FADED, amp=.2)
+        self.line([(x1 + nx * .15, y1 + ny * .15), (x1 + nx * ex, y1 + ny * ex)], w=.6, col=FADED, amp=.2)
+        self.line([a0, a1], w=.8, col=FADED, amp=.3)
+        self.arrow(*a1, *a0, col=FADED); self.arrow(*a0, *a1, col=FADED)
+        mx, my = (a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2
+        ang = -math.degrees(math.atan2(dy, dx))
+        if ang > 90: ang -= 180
+        if ang < -90: ang += 180
+        self.text(mx + nx / abs(off) * 12, my + ny / abs(off) * 12, label, 'GARAIT.TTF', size, col=FADED, angle=ang, anchor='mm')
+
+    def leader(self, x, y, tx, ty, letter):
+        self.line([(tx, ty), ((tx + x) / 2 + 6, (ty + y) / 2 - 4), (x, y)], w=.8, col=SEPIA, amp=.4)
+        self.dot(x, y, 2.2)
+        self.ellipse(tx, ty, 14, 14, w=.9, amp=.3)
+        self.text(tx, ty + 1, letter, 'BASKVILL.TTF', 19, anchor='mm')
+
+    def smudge(self, x, y, r, alpha=40):
+        lay = Image.new('RGBA', self.img.size, (0, 0, 0, 0))
+        ImageDraw.Draw(lay).ellipse([(x - r) * self.k, (y - r * .6) * self.k, (x + r) * self.k, (y + r * .6) * self.k], fill=(240, 233, 218, alpha))
+        self.img.alpha_composite(lay.filter(ImageFilter.GaussianBlur(r * self.k * .5)))
+
+    def result(self):
+        return self.img.resize((self.w, self.h), Image.LANCZOS)
+
+
+# ---- the margins: the Engine as it was meant
+
+def mill_plan(S, cx, cy):
+    S.ellipse(cx, cy, 92, 92, w=.5, col=PENCIL, alpha=150, dash=(6, 5), amp=.3)
+    S.line([(cx - 110, cy), (cx + 110, cy)], w=.45, col=PENCIL, alpha=140, dash=(14, 4, 2, 4))
+    S.line([(cx, cy - 110), (cx, cy + 110)], w=.45, col=PENCIL, alpha=140, dash=(14, 4, 2, 4))
+    S.ellipse(cx, cy, 40, 40, w=1.3); S.ellipse(cx, cy, 33, 33, w=.6, dash=(2, 2.5))
+    for i in range(12):
+        a = i * math.pi / 6 - math.pi / 2
+        x, y = cx + 92 * math.cos(a), cy + 92 * math.sin(a)
+        if i == 4:                                   # one axis left empty
+            S.ellipse(x, y, 15, 15, w=.5, col=PENCIL, alpha=160, dash=(3, 3)); continue
+        S.ellipse(x, y, 15, 15, w=1.1); S.ellipse(x, y, 4, 4, w=.8)
+        S.line([(cx + 44 * math.cos(a), cy + 44 * math.sin(a)), (cx + 76 * math.cos(a), cy + 76 * math.sin(a))], w=.5, col=FADED)
+    S.text(cx - 118, cy - 128, 'B.', 'BASKVILL.TTF', 22)
+    S.text(cx - 90, cy - 126, 'Mill,  in plan', 'GARAIT.TTF', 20, col=FADED)
+
+
+def barrel(S, x, y, w=250, h=64):
+    S.ellipse(x, y + h / 2, 12, h / 2, w=1.1)
+    S.ellipse(x + w, y + h / 2, 12, h / 2, a0=-math.pi / 2, a1=math.pi / 2, w=1.1)
+    S.line([(x, y), (x + w, y)], w=1.2); S.line([(x, y + h), (x + w, y + h)], w=1.2)
+    S.line([(x - 26, y + h / 2), (x + w + 30, y + h / 2)], w=.45, col=PENCIL, alpha=150, dash=(14, 4, 2, 4))
+    r = S.rng
+    for i in range(18):
+        for j in range(6):
+            if r.random() < .45:
+                S.dot(x + 12 + i * (w - 20) / 17, y + 8 + j * (h - 16) / 5, 2.1)
+    for i in range(0, 18, 3):
+        S.line([(x + 12 + i * (w - 20) / 17, y + h + 4), (x + 12 + i * (w - 20) / 17, y + h + 10)], w=.5, col=FADED, amp=.1)
+    S.text(x - 4, y - 36, 'C.', 'BASKVILL.TTF', 22)
+    S.text(x + 24, y - 34, 'Barrel, studs set by hand', 'GARAIT.TTF', 19, col=FADED)
+
+
+def store_column(S, cx, y0, n=15, rx=46, ry=11, pitch=20, label=('A.', 'Store, one column', 'GARAIT.TTF')):
+    S.line([(cx, y0 - 30), (cx, y0 + n * pitch + 20)], w=.45, col=PENCIL, alpha=150, dash=(14, 4, 2, 4))
+    r = S.rng
+    for i in range(n):
+        y = y0 + i * pitch
+        S.ellipse(cx, y, rx, ry, a0=0, a1=math.pi, w=1.)
+        S.ellipse(cx, y - 7, rx, ry, w=.9)
+        S.line([(cx - rx, y - 7), (cx - rx, y)], w=.9, amp=.1); S.line([(cx + rx, y - 7), (cx + rx, y)], w=.9, amp=.1)
+        S.text(cx - 3, y + 6, str(r.randrange(10)), 'BOD_R.TTF', 11, col=FADED, anchor='mm')
+    S.text(cx - 64, y0 - 64, label[0], 'BASKVILL.TTF', 22)
+    S.text(cx - 36, y0 - 62, label[1], label[2], 19 if label[2] != TYPE else 15, col=FADED)
+
+
+def card_chain(S, x0, y0, n=12, cw=74, ch=26):
+    r = S.rng
+    for i in range(n):
+        x = x0 + i * (cw + 8)
+        y = y0 + 16 * math.sin(math.pi * i / (n - 1))       # the chain sags
+        a = (-1) ** i * .05
+        c, s = math.cos(a), math.sin(a)
+        pts = [(x + (u * c - v * s), y + (u * s + v * c)) for u, v in ((0, 0), (cw, 0), (cw, ch), (0, ch))]
+        S.poly(pts, w=1.)
+        for hx in range(9):
+            for hy in range(3):
+                if r.random() < .35: S.dot(pts[0][0] + 7 + hx * (cw - 14) / 8, pts[0][1] + 6 + hy * (ch - 12) / 2, 1.5)
+        if i < n - 1: S.line([(x + cw - 2, y + ch / 2), (x + cw + 10, y + ch / 2 + 8 * math.cos(math.pi * i / (n - 1)))], w=.7)
+    S.text(x0 - 40, y0 - 4, 'D.', 'BASKVILL.TTF', 22)
+    S.text(x0 + 6, y0 - 34, 'Operation Cards', 'GARAIT.TTF', 19, col=FADED)
+    S.text(x0 + (n - 3) * (cw + 8), y0 - 34, 'E.  Variable Cards', 'GARAIT.TTF', 19, col=FADED)
+
+
+def note_g_table(S, x, y):
+    cols = [(46, 'No.'), (46, 'Op.'), (110, 'Variables acted upon'), (100, 'receiving results')]
+    rows = [('1', '×', '^1V_2 × ^1V_3', '^1V_4, ^1V_5, ^1V_6'), ('2', '−', '^1V_4 − ^1V_1', '^2V_4'), ('3', '+', '^1V_5 + ^1V_1', '^2V_5'),
+            ('4', '÷', '^2V_5 ÷ ^2V_4', '^1V_11'), ('5', '÷', '^1V_11 ÷ ^1V_2', '^2V_11')]
+    W = sum(c for c, _ in cols); rh = 20
+    S.poly([(x, y), (x + W, y), (x + W, y + rh * (len(rows) + 1)), (x, y + rh * (len(rows) + 1))], w=.9)
+    cx = x
+    for c, head in cols:
+        S.text(cx + 4, y + 4, head, 'GARAIT.TTF', 12, col=FADED)
+        cx += c
+        if cx < x + W: S.line([(cx, y), (cx, y + rh * (len(rows) + 1))], w=.6, amp=.2)
+    for i, row in enumerate(rows):
+        yy = y + rh * (i + 1)
+        S.line([(x, yy), (x + W, yy)], w=.5 if i else .9, amp=.2)
+        cx = x
+        for (c, _), v in zip(cols, row):
+            S.math(cx + 5, yy + 3, v, 'GARA.TTF', 13); cx += c
+    S.text(x, y - 26, 'after the Note G table (Bernoulli numbers)', 'GARAIT.TTF', 15, col=FADED)
+
+
+def detail(S, at, cx, cy, reading, r=100, label=('Detail at  a.', 'the column over pocket 4', 'GARAIT.TTF')):
+    """Detail view: a small circle on the machine, a leader, the part drawn large in the margin."""
+    ax, ay = at
+    S.ellipse(ax, ay, 22, 34, w=.8, amp=.3)
+    a = math.atan2(cy - ay, cx - ax)
+    S.line([(ax + 22 * math.cos(a), ay + 34 * math.sin(a)), (cx - r * math.cos(a), cy - r * math.sin(a))], w=.7, col=FADED, amp=.3)
+    S.ellipse(cx, cy, r, r, w=1.2, amp=.4)
+    n = len(reading); pitch = 2 * (r - 16) / n
+    for i, ch in enumerate(reading):
+        y = cy - (r - 16) + i * pitch + pitch * .5; hw = math.sqrt(max(r * r - (y - cy) ** 2, 0)) * .78
+        S.ellipse(cx, y - pitch * .32, hw, 6, w=.9, amp=.15)
+        S.ellipse(cx, y + pitch * .32, hw, 6, a0=0, a1=math.pi, w=.9, amp=.15)
+        S.line([(cx - hw, y - pitch * .32), (cx - hw, y + pitch * .32)], w=.9, amp=.1)
+        S.line([(cx + hw, y - pitch * .32), (cx + hw, y + pitch * .32)], w=.9, amp=.1)
+        S.text(cx + 2, y + 3, ch, 'BOD_R.TTF', pitch * .74, anchor='mm')
+    S.line([(cx, cy - r + 6), (cx, cy + r - 6)], w=.4, col=PENCIL, alpha=150, dash=(10, 3, 2, 3))
+    S.text(cx + r + 14, cy - 14, label[0], label[2], 19 if label[2] != TYPE else 15, col=FADED)
+    S.text(cx + r + 14, cy + 10, label[1], label[2], 15 if label[2] != TYPE else 13, col=FADED)
+    S.text(ax + 20, ay - 44, 'a', 'GARAIT.TTF', 20)
+
+
+def border(S):
+    W, H = S.w * 1080 / S.h, 1080
+    S.poly([(22, 22), (W - 22, 22), (W - 22, H - 22), (22, H - 22)], w=1.6, amp=.3)
+    S.poly([(32, 32), (W - 32, 32), (W - 32, H - 32), (32, H - 32)], w=.6, amp=.3)
+    for i in range(1, 8):
+        x = 32 + i * (W - 64) / 8
+        for y in (22, H - 32): S.line([(x, y), (x, y + 10)], w=.6, amp=0)
+        S.text(x - (W - 64) / 16, 27, str(i), 'COPRGTL.TTF', 9, col=FADED, anchor='mm')
+    for i, c in enumerate('ABCD'):
+        y = 32 + (i + .5) * (H - 64) / 4
+        S.text(27, y, c, 'COPRGTL.TTF', 9, col=FADED, anchor='mm')
+        if i: S.line([(22, 32 + i * (H - 64) / 4), (32, 32 + i * (H - 64) / 4)], w=.6, amp=0)
+
+
+def scale_bar(S, x, y):
+    S.text(x, y - 34, 'Scale of Inches', 'GARAIT.TTF', 19, col=FADED)
+    u = 22
+    S.poly([(x, y), (x + 12 * u, y), (x + 12 * u, y + 9), (x, y + 9)], w=.9, amp=.2)
+    for i in range(12):
+        if i % 2 == 0:
+            for t in range(4): S.line([(x + i * u + 2, y + 2 + t * 1.8), (x + (i + 1) * u - 2, y + 2 + t * 1.8)], w=.9, amp=.1)
+    for i in (0, 3, 6, 9, 12): S.text(x + i * u, y + 26, str(i), 'GARA.TTF', 14, anchor='mm')
+
+
+TB = (470, 150)
+
+
+def title_block(S, x, y, executed=False):
+    w, h = TB
+    S.poly([(x, y), (x + w, y), (x + w, y + h), (x, y + h)], w=1.5, amp=.3)
+    S.line([(x, y + 62), (x + w, y + 62)], w=.8, amp=.2)
+    S.line([(x, y + 104), (x + w, y + 104)], w=.8, amp=.2)
+    S.line([(x + 300, y + 104), (x + 300, y + h)], w=.8, amp=.2)
+    S.text(x + w / 2, y + 33, 'ANALYTICAL ENGINE.', 'ENGR.TTF', 30, anchor='mm')
+    S.text(x + w / 2, y + 84, 'General Plan,  No. 25.', 'GARAIT.TTF', 24, anchor='mm')
+    S.text(x + 16, y + 118, 'C. Babbage.', 'GARAIT.TTF', 20)
+    S.text(x + 316, y + 118, '1840.', 'GARAIT.TTF', 20)
+    if executed: strike(S, x, y); stamp(S, x + w / 2 + 10, y + 70)
+
+
+def strike(S, x, y):
+    w, h = TB
+    S.line([(x + 30, y + 36), (x + w - 30, y + 30)], w=2.6, amp=.5)             # struck out, by hand
+    S.line([(x + 60, y + 88), (x + w - 70, y + 84)], w=1.6, amp=.5)
+
+
+def stamp(S, cx, cy, ang=-7.):
+    k = S.k
+    W, H = 380 * k, 96 * k
+    lay = Image.new('RGBA', (int(W) + 20, int(H) + 20), (0, 0, 0, 0)); d = ImageDraw.Draw(lay)
+    for o, wd in ((4, 5), (14, 2)):
+        d.rectangle([10 + o * k, 10 + o * k, 10 + W - o * k, 10 + H - o * k], outline=RED + (235,), width=int(wd * k))
+    f1 = S.font('courbd.ttf', 34); f2 = S.font('courbd.ttf', 22)
+    d.text((10 + W / 2, 10 + H * .40), 'SORTIERMASCHINE', font=f1, fill=RED + (235,), anchor='mm')
+    d.text((10 + W / 2, 10 + H * .74), '17. MAI 1939', font=f2, fill=RED + (235,), anchor='mm')
+    r = S.rng                                                                 # the rubber misses in places
+    px = lay.load()
+    for _ in range(int(W * H / 90)):
+        x, y = r.randrange(lay.width), r.randrange(lay.height)
+        rr = r.randrange(1, 4)
+        for i in range(-rr, rr):
+            for j in range(-rr, rr):
+                if 0 <= x + i < lay.width and 0 <= y + j < lay.height:
+                    c = px[x + i, y + j]; px[x + i, y + j] = c[:3] + (int(c[3] * .25),)
+    lay = lay.rotate(ang, resample=Image.BICUBIC, expand=True)
+    S.img.alpha_composite(lay, (int(cx * k - lay.width / 2), int(cy * k - lay.height / 2)))
+
+
+# ---- the night sheet: the same places, the sorter's own drawings (typed, metric)
+TYPE = 'cour.ttf'
+
+
+def card_legend(S, x, y, w=300):
+    h = w * 8.26 / 18.73
+    cut = h * .25
+    S.poly([(x + cut, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y + cut * .44)], w=1.2, amp=.2)
+    hb = y + h * .095; hf = y + h * .19
+    S.line([(x + w * .035, hb), (x + w * .965, hb)], w=.6, amp=.1)
+    S.line([(x + w * .035, hf), (x + w * .965, hf)], w=.6, amp=.1)
+    for g in range(1, 8):
+        xx = x + w * (.035 + g * 10 * .93 / 80)
+        S.line([(xx, hb), (xx, hf)], w=.5, amp=.05)
+    S.text(x + w * .08, y + h * .05, 'VOLKSZÄHLUNG 1939', 'courbd.ttf', 9, anchor='lm')
+    for i in range(12):
+        for j in range(0, 80, 2):
+            S.dot(x + w * (.035 + (j + .5) * .93 / 80), y + h * (.2 + (i + .5) * .70 / 12), .45, col=FADED, alpha=170)
+    S.text(x + w + 16, y + 2, 'E.  Lochkarte, Vorderseite', TYPE, 15)
+    for lab, tx, ty, px_, py_ in [
+            ('Eckabschnitt', x + w + 16, y + 30, x + cut * .5, y + cut * .2),
+            ('Kopf, Felder', x + w + 16, y + 52, x + w * .6, y + h * .14),
+            ('Lochstellen 12, 11, 0 - 9', x + w + 16, y + 74, x + w * .97, y + h * .5),
+            ('Spalten 1 - 80', x + w + 16, y + 96, x + w * .8, y + h * .93)]:
+        S.text(tx, ty, lab, TYPE, 13, col=FADED)
+        S.line([(tx - 4, ty + 7), (px_, py_)], w=.5, col=FADED, amp=.2)
+        S.dot(px_, py_, 1.4, col=FADED)
+
+
+def pocket_plan(S, cx, cy):
+    n, cw, ch = 13, 20, 64
+    x0 = cx - n * cw / 2
+    S.poly([(x0 - 6, cy - ch / 2 - 6), (x0 + n * cw + 6, cy - ch / 2 - 6), (x0 + n * cw + 6, cy + ch / 2 + 6), (x0 - 6, cy + ch / 2 + 6)], w=1.1, amp=.2)
+    for i, lab in enumerate(['12', '11', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'R']):
+        xx = x0 + i * cw
+        S.poly([(xx + 2, cy - ch / 2), (xx + cw - 2, cy - ch / 2), (xx + cw - 2, cy + ch / 2), (xx + 2, cy + ch / 2)], w=.7, amp=.1)
+        S.text(xx + cw / 2, cy + ch / 2 + 18, lab, TYPE, 11, anchor='mm')
+    S.line([(x0 - 20, cy), (x0 + n * cw + 20, cy)], w=.4, col=PENCIL, alpha=150, dash=(10, 3, 2, 3))
+    S.text(x0 - 30, cy - ch / 2 - 44, 'B.  Fächer, Grundriß', TYPE, 15)
+
+
+def card_path(S, x, y):
+    """Section: magazine, feed rollers, the brush over its contact roller, chute blades, pockets; the card's way, dashed."""
+    S.poly([(x, y), (x + 50, y), (x + 50, y + 44), (x, y + 44)], w=1., amp=.2)
+    for i in range(6): S.line([(x + 6, y + 8 + i * 5), (x + 44, y + 8 + i * 5)], w=.5, amp=.05)
+    for cxr, cyr in ((x + 74, y + 40), (x + 74, y + 58), (x + 128, y + 40), (x + 128, y + 58)):
+        S.ellipse(cxr, cyr, 8, 8, w=.9, amp=.1); S.dot(cxr, cyr, 1.2)
+    S.ellipse(x + 176, y + 58, 12, 12, w=1., amp=.1)
+    for i in range(7): S.line([(x + 166 + i * 3, y + 34), (x + 169 + i * 3, y + 45)], w=.5, amp=.05)
+    S.poly([(x + 160, y + 26), (x + 194, y + 26), (x + 194, y + 34), (x + 160, y + 34)], w=.8, amp=.1)
+    for i in range(6):
+        a = x + 200 + i * 16
+        S.line([(a, y + 50), (a + 26, y + 78)], w=.8, amp=.1)
+        S.poly([(a + 18, y + 84), (a + 30, y + 84), (a + 30, y + 118), (a + 18, y + 118)], w=.7, amp=.1)
+    S.line([(x + 30, y + 49), (x + 170, y + 49), (x + 215, y + 70), (x + 262, y + 100)], w=.6, col=FADED, dash=(5, 4), amp=.2)
+    S.arrow(x + 215, y + 70, x + 262, y + 100, col=FADED)
+    S.text(x - 4, y - 36, 'C.  Kartenweg, Schnitt', TYPE, 15)
+
+
+def protocol(S, x, y):
+    """An empty sorting record: the headings, nothing filled in."""
+    cols = [(62, 'Durchgang'), (54, 'Spalte'), (50, 'Fach'), (70, 'Karten'), (66, 'Zeit')]
+    W = sum(c for c, _ in cols); rh = 20; nr = 6
+    S.text(x, y - 26, 'Sortierprotokoll', TYPE, 15)
+    S.poly([(x, y), (x + W, y), (x + W, y + rh * nr), (x, y + rh * nr)], w=.9, amp=.2)
+    cx = x
+    for c, head in cols:
+        S.text(cx + 4, y + 5, head, TYPE, 10, col=FADED)
+        cx += c
+        if cx < x + W: S.line([(cx, y), (cx, y + rh * nr)], w=.5, amp=.1)
+    for i in range(1, nr): S.line([(x, y + rh * i), (x + W, y + rh * i)], w=.5 if i > 1 else .9, amp=.1)
+
+
+def scale_metric(S, x, y):
+    S.text(x, y - 34, 'Maßstab  (cm)', TYPE, 15, col=FADED)
+    u = 9
+    S.poly([(x, y), (x + 30 * u, y), (x + 30 * u, y + 9), (x, y + 9)], w=.9, amp=.1)
+    for i in range(0, 30, 5):
+        if (i // 5) % 2 == 0:
+            for t in range(4): S.line([(x + i * u + 2, y + 2 + t * 1.8), (x + (i + 5) * u - 2, y + 2 + t * 1.8)], w=.9, amp=.05)
+    for i in (0, 10, 20, 30): S.text(x + i * u, y + 26, str(i), TYPE, 13, anchor='mm')
+
+
+CHIMNEYS = []
+
+
+def factories(S, W, top=858, bottom=1048):
+    """A continuous row of factories along the foot of the sheet (after the 1933 poster's city): saw-tooth roofs,
+    chimneys, windows in a grid like the holes of a card.  Solid ink; the windows are paper.  Returns chimney tops."""
+    img, k = S.img, S.k
+    d = ImageDraw.Draw(img)
+    INKc = SEPIA + (255,); PAP = (240, 233, 218, 255)
+    r = random.Random(11)
+    x, tops = 34, []
+    while x < W - 34:
+        bw = r.choice([150, 190, 230, 270])
+        h = r.choice([90, 110, 130])
+        y0 = bottom - h
+        d.rectangle([x * k, y0 * k, min(x + bw, W - 34) * k, bottom * k], fill=INKc)
+        # saw-tooth roof
+        n = max(2, bw // 46)
+        for i in range(n):
+            a = x + i * bw / n
+            d.polygon([(a * k, y0 * k), ((a + bw / n) * k, y0 * k), ((a + bw / n) * k, (y0 - 26) * k)], fill=INKc)
+        # windows: a grid, a few dark
+        for wy in range(int(y0 + 16), bottom - 16, 22):
+            for wx in range(int(x + 12), int(min(x + bw, W - 34) - 16), 17):
+                if r.random() < .82:
+                    d.rectangle([wx * k, wy * k, (wx + 7) * k, (wy + 11) * k], fill=PAP)
+        # chimneys
+        for _ in range(r.choice([1, 1, 2])):
+            cx = x + r.uniform(.2, .8) * bw
+            ch = r.choice([60, 80, 105])
+            d.rectangle([(cx - 7) * k, (y0 - ch) * k, (cx + 7) * k, y0 * k], fill=INKc)
+            d.rectangle([(cx - 10) * k, (y0 - ch) * k, (cx + 10) * k, (y0 - ch + 9) * k], fill=INKc)
+            tops.append((cx, y0 - ch))
+        x += bw + r.choice([0, 0, 6])
+    return tops
+
+
+MANUAL = ['1.  Karten mit der Bildseite nach unten in das Magazin legen.',
+          '2.  Sortierspalte einstellen.',
+          '3.  Jede Lochung der Spalte lenkt die Karte in ihr Fach.',
+          '4.  Karten ohne Lochung fallen in Fach R.',
+          '5.  Nach jedem Durchgang die Zählwerke ablesen.',
+          '6.  Fächer leeren, Karten in Reihenfolge ablegen.',
+          '7.  Nächste Spalte einstellen.  Wiederholen.']
+
+
+def draw_layers(cam, w, h):
+    """Separate sheets, so the film can bring them in and out:
+    frame   border, construction, margin sketches, scale          (the Engine as meant; stays)
+    quotes  Babbage's and Lovelace's words, the references         (go at EXECUTION)
+    title   the title block
+    notes   dimensions, leaders, the detail, pocket numbers        (come as the machine stands)
+    strike  the title struck out;  stamp  the red stamp
+    manual  the operating rules, the maker's plate                 (come after EXECUTION)"""
+    s = h / 1080
+    P = lambda x, y, z: tuple(v / s for v in cam.px((-x, y, z)))
+    W = w / s
+    L = {k: Sheet(w, h, seed=i + 3) for i, k in enumerate(['frame', 'quotes', 'title', 'notes', 'strike', 'stamp', 'manual', 'frame_n', 'notes_n', 'factory'])}
+
+    S = L['frame']
+    border(S)
+    for a, b in [((-74, -4, -16), (70, -4, -16)), ((-74, 0, -16), (-74, 0, 16)), ((-2, 21.8, 11.5), (-2, -13.5, 11.5))]:
+        (x0, y0), (x1, y1) = P(*a), P(*b)
+        dx, dy = x1 - x0, y1 - y0
+        S.line([(x0 - dx * .25, y0 - dy * .25), (x1 + dx * .25, y1 + dy * .25)], w=.45, col=PENCIL, alpha=110, amp=.2)
+    card_chain(S, 470, 92)
+    mill_plan(S, 212, 330)
+    barrel(S, 78, 560)
+    store_column(S, 1735, 318, n=12)
+    note_g_table(S, 1566, 736)
+    scale_bar(S, 70, 880)
+    S.smudge(330, 470, 60, 30)
+
+    S = L['quotes']
+    q, src = QUOTES['steam']
+    f, fs = 'ITCEDSCR.TTF', 46
+    qx, qy = 520, 176
+    S.text(qx, qy, q, f, fs, col=SEPIA)
+    pre = q[:q.index('executed')]
+    ux0 = qx + S.textw(pre, f, fs); ux1 = ux0 + S.textw('executed', f, fs)
+    S.line([(ux0, qy + fs * 1.02), (ux1, qy + fs * .98)], w=1.3, amp=.6)
+    S.line([(ux0 + 4, qy + fs * 1.12), (ux1 - 6, qy + fs * 1.1)], w=1., amp=.6)
+    S.text(qx + S.textw(q, f, fs) + 16, qy + 22, '— ' + src, 'GARAIT.TTF', 17, col=FADED)
+    for key, (x, y, wd) in (('wrong', (64, 690, 300)), ('order', (1566, 604, 300)), ('guide', (440, 948, 560))):
+        q, src = QUOTES[key]
+        yy = S.para(x, y, '“' + q + '”', 'GARAIT.TTF', 21, wd, col=SEPIA)
+        S.text(x, yy + 2, '— ' + src, 'GARAIT.TTF', 14, col=FADED)
+    S.text(1566, 60, 'REFERENCES.', 'COPRGTL.TTF', 18)
+    for i, (l, t) in enumerate([('A.', 'Store'), ('B.', 'Mill'), ('C.', 'Barrels'), ('D.', 'Operation Cards'), ('E.', 'Variable Cards')]):
+        S.text(1570, 92 + i * 26, l, 'BASKVILL.TTF', 18)
+        S.text(1604, 93 + i * 26, t, 'GARAIT.TTF', 19, col=FADED)
+
+    tx, ty = W - 530, 888
+    title_block(L['title'], tx, ty)
+    strike(L['strike'], tx, ty)
+    stamp(L['stamp'], tx + TB[0] / 2 + 10, ty + 70)
+
+    S = L['notes']
+    S.dim(P(-74, -13.5, -16), P(70, -13.5, -16), 30, '4 ft. 9 in.')
+    S.dim(P(70, -13.5, -16), P(70, 21.8, -16), 46, '1 ft. 2 in.')
+    for pt, off, Lt in [((-44, 17, -9.5), (-40, -90), 'C'), ((29.2, 21.8, 10.2), (-40, -90), 'A'), ((-58, 16.1, -5), (-60, -110), 'D'),
+                        ((20, 5, -10.2), (-30, 110), 'B'), ((-22, 10.2, -4), (10, -120), 'E')]:
+        x, y = P(*pt)
+        S.leader(x, y, x + off[0], y + off[1], Lt)
+    detail(S, P(29.2, 15.9, 10.2), 1105, 930, '041377')
+    for i, lab in enumerate(['12', '11', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'R']):
+        x, y = P(1.9 + 4.2 * i + 2.1, .9, -10.45)
+        S.text(x, y + 1, lab, 'GARA.TTF', 13, col=RED if lab == '4' else SEPIA, anchor='mm')
+
+    # night: the same places, the sorter's drawings
+    S = L['frame_n']
+    border(S)
+    for a_, b_ in [((-74, -4, -16), (70, -4, -16)), ((-74, 0, -16), (-74, 0, 16)), ((-2, 21.8, 11.5), (-2, -13.5, 11.5))]:
+        (x0, y0), (x1, y1) = P(*a_), P(*b_)
+        dx, dy = x1 - x0, y1 - y0
+        S.line([(x0 - dx * .25, y0 - dy * .25), (x1 + dx * .25, y1 + dy * .25)], w=.45, col=PENCIL, alpha=110, amp=.2)
+    card_legend(S, 460, 44)
+    pocket_plan(S, 212, 330)
+    card_path(S, 64, 546)
+    store_column(S, 1735, 318, n=12, label=('A.', 'Zählwerk, je Fach', TYPE))
+    protocol(S, 1566, 736)
+    scale_metric(S, 70, 150)
+    S.text(1566, 60, 'BEZEICHNUNGEN.', 'COPRGTL.TTF', 18)
+    for i, (l, t) in enumerate([('A.', 'Zählwerke'), ('B.', 'Fächer'), ('C.', 'Transportwalze'), ('D.', 'Kartenmagazin'), ('E.', 'Lochkarte')]):
+        S.text(1570, 92 + i * 26, l, 'BASKVILL.TTF', 18)
+        S.text(1604, 95 + i * 26, t, TYPE, 16, col=FADED)
+
+    S = L['notes_n']
+    S.dim(P(-74, -13.5, -16), P(70, -13.5, -16), 30, '1448 mm', size=16)
+    for pt, off, Lt in [((-44, 17, -9.5), (-40, -90), 'C'), ((29.2, 21.8, 10.2), (-40, -90), 'A'), ((-58, 16.1, -5), (-60, -110), 'D'),
+                        ((20, 5, -10.2), (-30, 110), 'B'), ((-22, 10.2, -4), (10, -120), 'E')]:
+        x, y = P(*pt)
+        S.leader(x, y, x + off[0], y + off[1], Lt)
+    for i, lab in enumerate(['12', '11', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'R']):
+        x, y = P(1.9 + 4.2 * i + 2.1, .9, -10.45)
+        S.text(x, y + 1, lab, TYPE, 12, col=RED if lab == '4' else SEPIA, anchor='mm')
+
+    CHIMNEYS[:] = factories(L['factory'], W)
+
+    # after: the rules for using it, typed, where the words were
+    S = L['manual']
+    S.text(W / 2, 206, 'Übersicht.', 'OLDENGL.TTF', 54, col=SEPIA, anchor='mm')
+    for i, ln in enumerate(MANUAL[:3]): S.para(64, 692 + i * 38, ln, 'cour.ttf', 14, 330, lead=1.08)
+    for i, ln in enumerate(MANUAL[3:5]): S.para(1566, 604 + i * 50, ln, 'cour.ttf', 17, 300, lead=1.15)
+    for i, ln in enumerate(MANUAL[5:]): S.para(64, 806 + i * 38, ln, 'cour.ttf', 14, 330, lead=1.08)
+    x0, y0 = P(38, -6.5, -13.1); x1, y1 = P(54, -6.5, -13.1)                  # the maker's plate on the plinth
+    S.poly([(x0, y0 - 11), (x1, y1 - 11), (x1, y1 + 11), (x0, y0 + 11)], w=1.1, amp=.2)
+    S.text((x0 + x1) / 2, (y0 + y1) / 2, 'DEHOMAG', 'COPRGTB.TTF', 14, anchor='mm',
+           angle=-math.degrees(math.atan2(y1 - y0, x1 - x0)))
+    return {k: v.result() for k, v in L.items()}
+
+
+def draw(cam, w, h, executed=True):
+    """The whole sheet as one picture (the still, t11)."""
+    Ls = draw_layers(cam, w, h)
+    out = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    for k in ['frame', 'quotes', 'title', 'notes'] + (['strike', 'stamp'] if executed else []):
+        out.alpha_composite(Ls[k])
+    return out

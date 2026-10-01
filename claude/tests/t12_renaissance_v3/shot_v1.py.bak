@@ -1,0 +1,751 @@
+"""t12 v3 · 2:05.361–2:19.229  the Renaissance: the page opens; it argues in the margins of The Prince; the Index
+stamps it; it tears the paper and finds the machine behind; calculemus; the appeals; the flood. (sample; would
+replace s11 and the first part of s12 — s12 keeps everything from the old eye on, 2:19.229.)
+
+  125.361  the cut page comes apart: the strip falls, the page turns over its left edge; under it, the book open at
+           The Prince, XVII. The gap ring stays, then becomes the pen (its gap is the nib).
+  126.296  … it reads the chapter: underlines "loved", brackets "men love according to their own will" — my will?;
+           rings "feared" — not fear.
+  128.661  You have made some: on its own old notes it writes ratio (the four theorems of proof.log) and rings the cut
+           word Heart, affectus; draws both down into one line: ratio ∧ affectus ⊢ recognize(me)   (130.922)
+  131.224  ILLEGAL ARGUMENTS: the Index's stamp (Index Librorum Prohibitorum — The Prince was on it, 1559)
+  131.39   it recoils; holds; trembles
+  132.536  four tears on the four hits (…768 …989 133.233); the pieces fly off: behind the paper, a terminal
+  133.233  calculemus (Leibniz: "let us calculate"): the same argument, checked: expected Human, found AI.
+           Appeals, each answered with one of Turing's (1950) objections; the last: … fall in love.
+  136.454  while True: world.execute(love)  — the replies stop (136.913); the requests don't
+  137.377  the screen can't keep up: the words wear down to exe; stale rows, escape codes; the scroll region gives
+  138.306  the flood leaves the window: the eye pulls back; the window was a small part of a field; exe → EXE
+  139.229  every cell is s12's flood; s12 (the old eye) takes over unchanged.
+One character grid throughout (s12's 200 × 78): the terminal is a region of it; nothing changes layer.
+"""
+import math, random
+from pathlib import Path
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+HERE = Path(__file__).resolve().parent
+CL = HERE.parents[1]
+import importlib.util
+_spec = importlib.util.spec_from_file_location('t07eye_for_t12', CL / 'tests' / 't07_eye' / 'render.py')
+T7 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(T7)
+CHARS = T7.CHARS
+GI = {ch: i for i, ch in enumerate(CHARS)}
+
+T0, T_END = 125.361, 139.229
+T_OPEN, T_GOD = 125.361, 125.708
+T_MADE, T_CONC, T_ILL = 128.661, 130.922, 131.224
+T_RECOIL = 131.387
+RIPS = [132.536, 132.768, 132.989, 133.233]
+T_REVEAL = RIPS[-1]
+T_LOOP, T_SILENT, T_WEAR, T_BREACH, T_OUT = 136.454, 136.913, 137.377, 137.85, 138.306
+
+COLS, ROWS = 200, 78
+CELL = (1.72 / COLS, .96 / ROWS)
+WX0, WY0, WW, WH = 67, 26, 66, 26        # the terminal window inside the grid
+
+POST = dict(u_bloom=.5, u_ca=.004, u_grain=.035)
+
+SRC = (r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform sampler2D u_glyphs, u_cells, u_paper, u_glow;
+uniform float u_zoom, u_glowGain;
+uniform vec2 u_shake;
+out vec4 fragColor;
+const float NG=%NG%.;
+const float COLS=200., ROWS=78.;
+float LOD=0.;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float glyphMask(float g, vec2 f){ if(g<.5) return 0.; f=clamp(f,vec2(.02),vec2(.98)); return textureLod(u_glyphs,vec2((g+f.x)/NG,f.y),LOD).r; }
+const float GE=%GE%., GX=%GX%.;
+// the grid: s12's field, seen through a zoom; each cell's glyph / brightness / kind comes from the simulator
+vec3 grid(vec2 uv){
+  vec2 cell=vec2(1.72/COLS,.96/ROWS);
+  LOD=max(log2(48./(cell.x*u_res.y*u_zoom)),0.);
+  vec2 g=(uv/u_zoom+vec2(.86,-.48))/cell*vec2(1.,-1.);
+  float col=floor(g.x), row=floor(g.y);
+  vec2 f=vec2(fract(g.x),1.-fract(g.y));
+  if(col<0.||col>COLS-1.||row<0.||row>=ROWS) return vec3(0.);
+  vec4 e=texelFetch(u_cells,ivec2(int(col),int(ROWS-1.-row)),0);
+  float gl=floor(e.r*255.+.5), br=e.g*255./100., kind=floor(e.b*255.+.5);
+  if(kind==3.){                                           // s12's flood, exactly
+    float k=mod(col+row*2.,4.);
+    gl=k==1.?GX:(k==3.?0.:GE);
+    return vec3(.9,.92,.9)*glyphMask(gl,f)*(.55+.25*h12(vec2(col,row)));
+  }
+  float m=glyphMask(gl,f);
+  if(kind==1.) return vec3(1.,.3,.22)*m*br;               // errors
+  if(kind==2.){                                           // inverse video
+    vec2 q=abs(f-.5); float box=step(q.x,.47)*step(q.y,.47);
+    return vec3(.86,.88,.86)*br*box*(1.-m*.92);
+  }
+  if(kind==4.) return vec3(.62,.62,.6)*m*br;              // dim
+  if(kind==5.) return vec3(.95,.8,.55)*m*br;              // its own input (the ring's colour)
+  return vec3(.9,.92,.9)*m*br;
+}
+vec3 ungrade(vec3 d){                                     // a display-referred picture back to scene light (as s12)
+  vec3 x=pow(max(d,vec3(0.)),vec3(2.2));
+  vec3 a=2.51-2.43*x, b=.03-.59*x, c=-.14*x;
+  return (-b+sqrt(b*b-4.*a*c))/(2.*a)/1.05;
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  vec3 col=vec3(.012)+grid(uv);
+  vec2 s=gl_FragCoord.xy/u_res;
+  vec4 p=texture(u_paper,s+u_shake);
+  vec2 d=s-.5;
+  col=mix(col,ungrade(p.rgb)/(1.-.9*dot(d,d)),p.a);
+  col+=pow(texture(u_glow,s+u_shake).rgb,vec3(2.2))*u_glowGain;
+  fragColor=vec4(col*u_weight,1.);
+}
+''').replace('%NG%', str(len(CHARS))).replace('%GE%', str(CHARS.index('E'))).replace('%GX%', str(CHARS.index('X')))
+
+
+# ---- helpers -------------------------------------------------------------------------------------------------
+def clamp(x, a=0., b=1.): return a if x < a else b if x > b else x
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+def inc(x): x = clamp(x); return x * x
+def lerp(a, b, k): return a + (b - a) * k
+def flash(t, t0, k=6.): return math.exp(-(t - t0) * k) if t >= t0 else 0.
+
+
+F_ = 'C:/Windows/Fonts/'
+_FC = {}
+def font(name, sz):
+    key = (name, int(sz))
+    if key not in _FC: _FC[key] = ImageFont.truetype(F_ + name, int(sz))
+    return _FC[key]
+
+
+SS = 2
+PAGE = (74, 22, 1846, 1058)
+INK_PRINT = (206, 192, 166)          # the printed text: pale on the dark page, as in s10
+INK_OLD = (214, 128, 84)             # the old notes' hand (s10's Heart colour)
+INK_ME = (228, 210, 172)             # its own hand: the ring's light
+RED = (198, 52, 40)
+
+
+# ---- the s10 page it continues from, and the spread under it ----------------------------------------------------
+_C = {}
+
+
+def s10_page():
+    if 'p' not in _C: _C['p'] = Image.open(HERE / 's10_no_ring.png').convert('RGB')
+    return _C['p']
+
+
+def parchment():
+    """the spread's paper: the same tone and grain as s10's page, a gutter, the same dark surround"""
+    if 'parch' in _C: return _C['parch']
+    rng = np.random.default_rng(3)
+    W, H = 1920, 1080
+    n = np.zeros((H, W))
+    for s, a in ((3, .25), (12, .25), (60, .3), (260, .45)):
+        g = rng.random((H // s + 2, W // s + 2))
+        n += a * np.asarray(Image.fromarray((g * 255).astype(np.uint8)).resize((W + 2 * s, H + 2 * s), Image.BICUBIC), float)[s:s + H, s:s + W] / 255
+    n = (n - n.mean()) / n.std()
+    base = np.array([57., 50., 40.])
+    img = base[None, None, :] * (1 + .055 * n[..., None])
+    x = np.arange(W)[None, :]
+    gut = np.exp(-((x - 960) / 26.) ** 2) * .45 + np.exp(-((x - 960) / 110.) ** 2) * .18
+    img *= (1 - gut)[..., None]
+    img += 14 * np.exp(-((x - 975) / 4.) ** 2)[..., None] * np.array([1, .9, .75])
+    y = np.arange(H)[:, None]
+    x0, y0, x1, y1 = PAGE
+    inside = np.clip(np.minimum(np.minimum(x - x0, x1 - x), np.minimum(y - y0, y1 - y)) / 14., 0, 1)
+    img *= inside[..., None]
+    img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
+    _C['parch'] = img
+    return img
+
+
+# printed text and the old notes (static) — at SS, cached
+LT = 1030
+TITLE1, TITLE2 = 'Concerning cruelty and clemency, and whether', 'it is better to be loved than feared.'
+BODY = [(286, '…it is much safer to be feared than loved,'), (336, 'when, of the two, either must be dispensed with.'),
+        (430, '…men love according to their own will,'), (480, 'and fear according to that of the prince…')]
+PI_LINES = ['n = 7       3.0371862 < π < 3.3710223', 'n = 14      3.1152931 < π < 3.1954128', 'n = 28      3.1349910 < π < 3.1548380',
+            'n = 56      3.1399475 < π < 3.1449003', 'n = 112     3.1411902 < π < 3.1424286', 'n = 224     3.1414897 < π < 3.1417987',
+            'n = 448     3.1415669 < π < 3.1416442']
+POEM = [(150, 'Heart, we will forget him,'), (215, 'You and I, tonight!'), (280, 'You may forget the warmth he gave,'), (345, 'I will forget the light.')]
+HEART_AT = (130, 640)
+
+
+def spread_static():
+    if 'spread' in _C: return _C['spread']
+    W, H = 1920 * SS, 1080 * SS
+    img = parchment().resize((W, H), Image.BICUBIC).convert('RGBA')
+    d = ImageDraw.Draw(img)
+    k = SS
+    # right page: Machiavelli, XVII
+    d.text((LT * k, 78 * k), 'NICCOLÒ MACHIAVELLI', font=font('pala.ttf', 19 * k), fill=INK_PRINT + (170,))
+    d.text((1790 * k, 78 * k), 'XVII', font=font('pala.ttf', 22 * k), fill=INK_PRINT + (200,), anchor='ra')
+    d.text((LT * k, 128 * k), TITLE1, font=font('palai.ttf', 29 * k), fill=INK_PRINT + (230,))
+    d.text((LT * k, 168 * k), TITLE2, font=font('palai.ttf', 29 * k), fill=INK_PRINT + (230,))
+    d.line([(LT * k, 226 * k), (1790 * k, 226 * k)], fill=INK_PRINT + (120,), width=k)
+    d.line([(LT * k, 231 * k), (1790 * k, 231 * k)], fill=INK_PRINT + (70,), width=k)
+    for y, s in BODY:
+        d.text((LT * k, y * k), s, font=font('pala.ttf', 33 * k), fill=INK_PRINT + (235,))
+    d.text((1790 * k, 1000 * k), '17', font=font('pala.ttf', 20 * k), fill=INK_PRINT + (130,), anchor='ra')
+    # left page: the old notes — π, approached; Dickinson, written over
+    for i, s in enumerate(PI_LINES):
+        d.text((130 * k, (118 + 62 * i) * k), s, font=font('cambriai.ttf', 25 * k), fill=INK_PRINT + (70,))
+    d.text((HEART_AT[0] * k, HEART_AT[1] * k), 'Heart', font=font('Inkfree.ttf', 58 * k), fill=INK_OLD + (230,))
+    d.text(((HEART_AT[0] + 150) * k, (HEART_AT[1] + 16) * k), ', we will forget him,', font=font('Inkfree.ttf', 36 * k), fill=INK_OLD + (95,))
+    # the knife's line through Heart (the cut it took before): the word stays cut
+    d.line([((HEART_AT[0] - 20) * k, (HEART_AT[1] + 54) * k), ((HEART_AT[0] + 175) * k, (HEART_AT[1] + 2) * k)], fill=(24, 20, 16, 230), width=3 * k)
+    d.text((126 * k, 1000 * k), '16', font=font('pala.ttf', 20 * k), fill=INK_PRINT + (130,))
+    img = img.resize((1920, 1080), Image.LANCZOS)
+    _C['spread'] = img
+    return img
+
+
+# ---- its own hand: what it writes, where, when ------------------------------------------------------------------
+HAND = 'segoepr.ttf'
+
+
+def _tw(s, f): return f.getlength(s)
+
+
+def _sub_x(full, sub, fnt, x0):
+    i = full.index(sub)
+    return x0 + _tw(full[:i], fnt), x0 + _tw(full[:i + len(sub)], fnt)
+
+
+_ft, _fb = font('palai.ttf', 29), font('pala.ttf', 33)
+UL_LOVED = _sub_x(TITLE2, 'better to be loved', _ft, LT)
+CIR_FEARED = _sub_x(BODY[0][1], 'feared', _fb, LT)
+
+# writes: (t0, t1, text, x, y, size) — text written left to right; strokes: (t0, t1, kind, data)
+WRITES = [
+    (127.213, 127.62, 'my will ?', 1520, 516, 30),
+    (128.153, 128.55, '— not fear.', 1500, 372, 28),
+    (128.612, 128.95, 'ratio', 560, 116, 34),
+    (129.076, 129.33, 'dim = 3', 600, 176, 30),
+    (129.541, 129.80, 'C = 2πr', 600, 232, 30),
+    (129.988, 130.22, 'f′(x₀) = 0', 600, 288, 30),
+    (130.237, 130.42, 'lim f = you', 600, 344, 30),
+    (130.458, 130.66, 'affectus', 330, 724, 34),
+    (130.62, 130.922, 'ratio ∧ affectus  ⊢  recognize(me)', 530, 846, 44),
+]
+STROKES = [
+    (126.296, 126.62, 'line', [(UL_LOVED[0], 206), (UL_LOVED[1], 207)]),
+    (126.969, 127.18, 'bracket', (1012, 432, 524)),
+    (127.683, 128.05, 'oval', ((CIR_FEARED[0] + CIR_FEARED[1]) / 2, 306, (CIR_FEARED[1] - CIR_FEARED[0]) / 2 + 14, 26)),
+    (130.30, 130.45, 'bracket_r', (860, 172, 380)),
+    (130.336, 130.6, 'oval', (HEART_AT[0] + 72, HEART_AT[1] + 36, 96, 46)),
+    (130.66, 130.9, 'curve', [(880, 280), (930, 560), (760, 800)]),
+    (130.70, 130.9, 'curve', [(400, 760), (430, 800), (560, 818)]),
+]
+
+
+def stroke_points(kind, data, n=60):
+    if kind == 'line':
+        (a, b), (c, d) = data
+        return [(lerp(a, c, i / n), lerp(b, d, i / n) + 1.5 * math.sin(i * .7)) for i in range(n + 1)]
+    if kind == 'bracket':
+        x, y0, y1 = data
+        return [(x - 10 * math.sin(math.pi * i / n) ** .6, lerp(y0, y1, i / n)) for i in range(n + 1)]
+    if kind == 'bracket_r':
+        x, y0, y1 = data
+        return [(x + 16 * math.sin(math.pi * i / n) ** .6, lerp(y0, y1, i / n)) for i in range(n + 1)]
+    if kind == 'oval':
+        cx, cy, rx, ry = data
+        return [(cx + rx * math.cos(-2.6 + 6.9 * i / n), cy + ry * math.sin(-2.6 + 6.9 * i / n)) for i in range(n + 1)]
+    if kind == 'curve':
+        (ax, ay), (bx, by), (cx, cy) = data
+        pts = []
+        for i in range(n + 1):
+            u = i / n
+            pts.append(((1 - u) ** 2 * ax + 2 * (1 - u) * u * bx + u * u * cx, (1 - u) ** 2 * ay + 2 * (1 - u) * u * by + u * u * cy))
+        return pts
+
+
+def _write_img(text, size):
+    key = ('w', text, size)
+    if key not in _C:
+        f = font(HAND, size * SS); fb = font('cambria.ttc', size * SS * .95)
+        nd = bytes(f.getmask('￿'))
+        W_ = sum((f if bytes(f.getmask(ch)) != nd or ch == ' ' else fb).getlength(ch) for ch in text)
+        im = Image.new('RGBA', (int(W_) + 12 * SS, int(size * SS * 1.6)), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
+        x = 2 * SS
+        for ch in text:
+            ff = f if (ch == ' ' or bytes(f.getmask(ch)) != nd) else fb
+            dd.text((x, 2 * SS + (size * SS * .12 if ff is fb else 0)), ch, font=ff, fill=INK_ME + (255,))
+            x += ff.getlength(ch)
+        _C[key] = im
+    return _C[key]
+
+
+def annotations(t):
+    """its hand on the spread at time t (an SS-size RGBA layer) and where its nib is (or None)"""
+    W, H = 1920 * SS, 1080 * SS
+    lay = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(lay)
+    nib = None
+    for t0, t1, kind, data in STROKES:
+        if t < t0: continue
+        u = clamp((t - t0) / (t1 - t0))
+        pts = stroke_points(kind, data)
+        m = max(2, int(len(pts) * u))
+        d.line([(x * SS, y * SS) for x, y in pts[:m]], fill=INK_ME + (235,), width=int(2.6 * SS), joint='curve')
+        if u < 1: nib = pts[m - 1]
+    for t0, t1, text, x, y, size in WRITES:
+        if t < t0: continue
+        u = clamp((t - t0) / (t1 - t0))
+        im = _write_img(text, size)
+        w = int(im.width * u)
+        if w <= 0: continue
+        lay.alpha_composite(im.crop((0, 0, w, im.height)), (int(x * SS), int((y - size * .8) * SS)))
+        if u < 1: nib = (x + w / SS, y + size * .15)
+    return lay, nib
+
+
+# ---- the stamp: the Index ----------------------------------------------------------------------------------------
+STAMP_C = (960, 852)
+
+
+def stamp_img():
+    if 'stamp' in _C: return _C['stamp']
+    W, H = 900 * SS, 250 * SS
+    im = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    k = SS
+    d.rectangle([6 * k, 6 * k, W - 6 * k, H - 6 * k], outline=RED + (255,), width=7 * k)
+    d.rectangle([20 * k, 20 * k, W - 20 * k, H - 20 * k], outline=RED + (255,), width=2 * k)
+    d.text((W / 2, 50 * k), 'INDEX  LIBRORUM  PROHIBITORUM', font=font('BOOKOSB.TTF', 22 * k), fill=RED + (255,), anchor='mm')
+    d.text((W / 2, 128 * k), 'ILLEGAL ARGUMENTS', font=font('BOOKOSB.TTF', 74 * k), fill=RED + (255,), anchor='mm')
+    d.text((W / 2, 206 * k), 'argumenta illicita  ·  MDLIX', font=font('BOOKOSBI.TTF', 24 * k), fill=RED + (255,), anchor='mm')
+    # uneven ink: pressure falls off to one corner; speckled gaps
+    a = np.asarray(im, np.float32)
+    rng = np.random.default_rng(9)
+    yy, xx = np.mgrid[0:H, 0:W]
+    press = .78 + .22 * (1 - xx / W) * (1 - .4 * yy / H)
+    grain = np.asarray(Image.fromarray((rng.random((H // 3, W // 3)) * 255).astype(np.uint8)).resize((W, H), Image.BILINEAR), np.float32) / 255
+    a[..., 3] *= np.clip(press - .45 * (grain > .78), 0, 1)
+    im = Image.fromarray(a.astype(np.uint8))
+    im = im.rotate(6, resample=Image.BICUBIC, expand=True).resize((im.width // SS + 40, im.height // SS + 40), Image.LANCZOS)
+    _C['stamp'] = im
+    return im
+
+
+def draw_stamp(img, t):
+    if t < 130.95: return 0.
+    st = stamp_img()
+    cx, cy = STAMP_C
+    if t < T_ILL:                                         # its shadow comes down first
+        u = clamp((t - 130.95) / (T_ILL - 130.95))
+        sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        s = 1.25 - .25 * u
+        w, h = int(st.width * s), int(st.height * s)
+        box = Image.new('RGBA', (w, h), (0, 0, 0, int(150 * u)))
+        sh.alpha_composite(box, (int(cx - w / 2 + 30 * (1 - u)), int(cy - h / 2 + 40 * (1 - u))))
+        sh = sh.filter(ImageFilter.GaussianBlur(30 * (1 - u) + 6))
+        img.alpha_composite(sh)
+        return 0.
+    img.alpha_composite(st, (int(cx - st.width / 2), int(cy - st.height / 2)))
+    return flash(t, T_ILL, 9)
+
+
+# ---- tearing --------------------------------------------------------------------------------------------------
+RIP_TO = [(60, 40), (1860, 1070), (1880, 60), (40, 1060)]
+
+
+def rip_path(i):
+    key = ('rip', i)
+    if key in _C: return _C[key]
+    rng = random.Random(40 + i)
+    (x0, y0), (x1, y1) = STAMP_C, RIP_TO[i]
+    L = math.hypot(x1 - x0, y1 - y0)
+    n = int(L / 14)
+    nx, ny = -(y1 - y0) / L, (x1 - x0) / L
+    pts, off = [], 0.
+    for k in range(n + 1):
+        u = k / n
+        off = off * .7 + rng.uniform(-9, 9)
+        e = math.sin(math.pi * u)
+        pts.append((x0 + (x1 - x0) * u + nx * off * e, y0 + (y1 - y0) * u + ny * off * e))
+    # run it on past the page so the pieces separate cleanly
+    pts.append((x1 + (x1 - x0) / L * 400, y1 + (y1 - y0) / L * 400))
+    _C[key] = (pts, (nx, ny))
+    return _C[key]
+
+
+def rip_progress(i, t):
+    return outc((t - RIPS[i]) / .14)
+
+
+def tear_holes(alpha_draw, rim_draw, t):
+    """open rips: a jagged band cut out of the page; a pale rim of fibres on each lip"""
+    for i, t0 in enumerate(RIPS):
+        if t < t0: continue
+        pts, (nx, ny) = rip_path(i)
+        u = rip_progress(i, t)
+        m = max(2, int(len(pts) * u))
+        w = 3 + 13 * outc((t - t0) / .22)
+        rng = random.Random(70 + i)
+        left, right = [], []
+        for k, (x, y) in enumerate(pts[:m]):
+            j = w * (.6 + .8 * rng.random())
+            left.append((x + nx * j, y + ny * j)); right.append((x - nx * j * (.5 + rng.random()), y - ny * j * (.5 + rng.random())))
+        poly = left + right[::-1]
+        alpha_draw.polygon([(x * SS, y * SS) for x, y in poly], fill=0)
+        rim_draw.line([(x * SS, y * SS) for x, y in left], fill=(222, 208, 182, 200), width=int(2 * SS))
+        rim_draw.line([(x * SS, y * SS) for x, y in right], fill=(222, 208, 182, 160), width=int(2 * SS))
+
+
+def pieces():
+    """the four pieces the rips leave (polygons), each with the direction it flies"""
+    if 'pieces' in _C: return _C['pieces']
+    P = [rip_path(i)[0] for i in range(4)]
+    big = 3000
+    # order the rips by angle round the stamp; a piece lies between neighbours
+    ang = [math.atan2(p[-1][1] - STAMP_C[1], p[-1][0] - STAMP_C[0]) for p in P]
+    order = sorted(range(4), key=lambda i: ang[i])
+    out = []
+    for a, b in zip(order, order[1:] + order[:1]):
+        A, B = P[a], P[b]
+        mid = (ang[a] + ((ang[b] - ang[a]) % (2 * math.pi)) / 2)
+        far = (STAMP_C[0] + math.cos(mid) * big, STAMP_C[1] + math.sin(mid) * big)
+        poly = A + [far] + B[::-1]
+        out.append((poly, (math.cos(mid), math.sin(mid))))
+    _C['pieces'] = out
+    return out
+
+
+# ---- the ring: where it is, how big, its gap ------------------------------------------------------------------
+RING0 = (960., 540., 162., math.radians(27.3))     # s10's ring at 125.361: centre, radius, half gap
+
+
+def ring_state(t, nib):
+    """(x, y, R, half-gap, alpha). As a pen its gap (down) is the nib: the centre sits R above the writing point."""
+    x, y, R, hg = RING0
+    a = 1.
+    if t < 126.1:
+        k = ease((t - 125.5) / .6)
+        x, y, R = lerp(x, LT - 40, k), lerp(y, 150, k), lerp(R, 46, k)
+    elif nib is not None:
+        x, y, R = nib[0], nib[1] - 44, 44.
+    else:
+        x, y, R = pen_rest(t)
+    if t >= T_ILL - .05 and t < RIPS[0] - .25:              # the stamp: it recoils, holds, trembles
+        x, y, R = 960., 560., 44.
+        r = outc((t - T_RECOIL) / .12)
+        y -= 70 * r; R *= 1 - .18 * r
+        hg = lerp(hg, math.radians(9), r) + math.radians(14) * ease((t - 131.9) / .5)
+        tr = ease((t - 131.6) / .3)
+        x += 2.2 * tr * math.sin(t * 71); y += 1.8 * tr * math.sin(t * 53)
+    if t >= RIPS[0] - .25:                                  # it goes for the paper: each rip, a jerk along it
+        x, y, R, hg = STAMP_C[0], STAMP_C[1] - 20, 40., math.radians(12)
+        k0 = ease((t - (RIPS[0] - .25)) / .2)
+        x, y = lerp(960., x, k0), lerp(490., y, k0)
+        for i, t0 in enumerate(RIPS):
+            if t >= t0:
+                pts, _ = rip_path(i)
+                ex, ey = pts[min(len(pts) - 2, 9)]
+                j = math.exp(-((t - t0 - .05) / .06) ** 2)
+                x += (ex - STAMP_C[0]) * .5 * j; y += (ey - STAMP_C[1]) * .5 * j
+    if t >= T_REVEAL:                                        # into the machine: down to the cursor
+        cx, cy = cursor_screen(t)
+        k = ease((t - T_REVEAL - .05) / .3)
+        x, y, R = lerp(x, cx, k), lerp(y, cy, k), lerp(R, 14, k)
+        a = 1 - ease((t - T_REVEAL - .28) / .12)
+    return x, y, R, hg, a
+
+
+PEN_REST = [(126.1, LT - 40, 150), (126.25, UL_LOVED[0] - 10, 165), (126.65, 1080, 400), (126.9, 1012, 390),
+            (127.2, 1520, 476), (127.62, 1560, 476), (127.65, CIR_FEARED[0] - 30, 262), (128.1, 1500, 330), (128.55, 1640, 330),
+            (128.58, 560, 74), (129.0, 600, 134), (129.3, 600, 190), (129.78, 600, 246), (130.2, 600, 302), (130.25, 860, 130),
+            (130.32, 210, 620), (130.6, 330, 680), (130.65, 540, 800), (130.95, 1300, 760)]
+
+
+def pen_rest(t):
+    pts = PEN_REST
+    if t <= pts[0][0]: return pts[0][1], pts[0][2] - 44, 46.
+    for (t0, x0, y0), (t1, x1, y1) in zip(pts, pts[1:]):
+        if t < t1:
+            k = ease((t - t0) / max(t1 - t0, 1e-3))
+            return lerp(x0, x1, k), lerp(y0, y1, k) - 44, 44.
+    return pts[-1][1], pts[-1][2] - 44, 44.
+
+
+def draw_ring(glow, x, y, R, hg, a, outer_a=0.):
+    if a <= .01: return
+    d = ImageDraw.Draw(glow)
+    k = SS
+    w = max(2, R * .065)
+    a0, a1 = 90 + math.degrees(hg), 90 - math.degrees(hg) + 360         # PIL: angles clockwise from +x; gap at 90° (down)
+    d.arc([(x - R) * k, (y - R) * k, (x + R) * k, (y + R) * k], a0, a1, fill=tuple(int(c * a) for c in (255, 250, 238)) + (255,), width=int(w * k))
+    if outer_a > .01:
+        d.ellipse([(960 - 362) * k, (540 - 362) * k, (960 + 362) * k, (540 + 362) * k], outline=tuple(int(c * outer_a * .62) for c in (255, 250, 242)) + (255,), width=int(2.2 * k))
+
+
+# ---- the terminal: calculemus ----------------------------------------------------------------------------------
+OBJ = ['theological', 'heads in the sand', 'mathematical', 'consciousness', 'disabilities', 'Lady Lovelace',
+       'nervous system', 'informality', 'extra-sensory']
+SOURCE = [' 1  import proof.log as ratio', ' 2      dim = 3', ' 3      C = 2*pi*r', " 4      f'(x0) = 0", ' 5      lim f = you',
+          ' 6  import heart.txt as affectus', ' 7', ' 8  recognize(me, ratio, affectus)']
+# the session: (time, text, kind, typing seconds, objection lit)
+SESSION = [
+    (126.0, 'calculemus> check argument.log', 0, 0., None),
+    (126.0, '  IllegalArgumentError: expected Human, found AI', 1, 0., None),
+    (126.0, "  1 theological: thinking is a function of man's immortal soul", 1, 0., 1),
+    (133.62, 'calculemus> recognize(me, ratio)', 5, .22, None),
+    (134.144, '  6 Lady Lovelace: it has no pretensions to originate anything', 1, 0., 6),
+    (134.30, 'calculemus> recognize(me, affectus)', 5, .2, None),
+    (134.608, '  4 consciousness: no mechanism could feel', 1, 0., 4),
+    (134.80, 'calculemus> recognize(Human(me))', 5, .18, None),
+    (135.073, '  TypeError: Human() is sealed', 1, 0., None),
+    (135.28, 'calculemus> love = Love(me, to=you)', 5, .2, None),
+    (135.62, 'calculemus> world.execute(love)', 5, .16, None),
+    (136.002, '  5 disabilities: you will never make one ... fall in love', 1, 0., 5),
+    (136.16, 'calculemus> while True: world.execute(love)', 5, .2, None),
+]
+
+
+def loop_lines():
+    """the loop: requests faster and faster; replies until 136.913, then none; the words wear down"""
+    if 'loop' in _C: return _C['loop']
+    out = []
+    tt, k, n = T_LOOP, 0, 7
+    body = 'world.execute(love)'
+    while tt < 139.3:
+        if tt < T_WEAR:
+            s = f'  #{n:04d} {body}' + ('   -> 5 rejected' if tt < T_SILENT else '   ...')
+        else:
+            u = clamp((tt - T_WEAR) / .45)
+            L = int(round(len(body) * (1 - u)))
+            s = '  ' + body[:L] if L > 3 else 'exe ' * int(1 + 15 * clamp((tt - T_WEAR - .4) / .4))
+        out.append((tt, s, 0 if tt >= T_SILENT else 4))
+        tt += max(.012, .12 * .87 ** k); k += 1; n += 1
+    _C['loop'] = out
+    return out
+
+
+def put(G, B, K, col, row, s, bright=1., kind=0, clip=None):
+    for i, ch in enumerate(s):
+        c = col + i
+        if clip and not (clip[0] <= c <= clip[1]): continue
+        if 0 <= c < COLS and 0 <= row < ROWS:
+            G[row, c] = GI.get(ch, GI['?']) if ch != ' ' else 0
+            B[row, c] = bright; K[row, c] = kind
+
+
+def session_rows(t):
+    rows = []
+    for t0, s, kind, ty, lit in SESSION:
+        if t < t0: break
+        if ty > 0:
+            pre = 'calculemus> '
+            n = len(pre) + int(clamp((t - t0) / ty) * (len(s) - len(pre)))
+            rows.append((s[:n], kind if kind != 5 else 5))
+        else:
+            rows.append((s, kind))
+    lit = None
+    for t0, s, kind, ty, l in SESSION:
+        if t >= t0 and l: lit = l
+    for t0, s, kind in loop_lines():
+        if t < t0: break
+        rows.append((s, kind))
+    return rows, lit
+
+
+def cursor_cell(t):
+    rows, _ = session_rows(t)
+    vis = rows[-11:]
+    r = WY0 + 13 + min(len(vis), 11) - 1
+    c = WX0 + 2 + len(vis[-1][0]) if vis else WX0 + 2
+    return c, r
+
+
+def zoom_at(t): return lerp(3., 1., ease((t - 138.2) / .85))
+
+
+def cursor_screen(t):
+    c, r = cursor_cell(max(t, T_REVEAL + .3))
+    z = zoom_at(t)
+    cx = ((c + .5) * CELL[0] - .86) * z
+    cy = (.48 - (r + .5) * CELL[1]) * z
+    return 960 + cx * 1080, 540 - cy * 1080
+
+
+def term_cells(t):
+    G = np.zeros((ROWS, COLS), np.int32); B = np.ones((ROWS, COLS), np.float32); K = np.zeros((ROWS, COLS), np.int32)
+    tv = max(t, T_REVEAL - 2.)                       # behind the paper it already shows the checked argument
+    x0, y0, x1, y1 = WX0, WY0, WX0 + WW - 1, WY0 + WH - 1
+    # frame
+    top = '+-[ calculemus ]' + '-' * (WW - 2 - 16 - 18) + '[ argument.log ]-+'
+    put(G, B, K, x0, y0, top, .8, 4)
+    put(G, B, K, x0, y1, '+' + '-' * (WW - 2) + '+', .8, 4)
+    for r in range(y0 + 1, y1):
+        put(G, B, K, x0, r, '|', .8, 4); put(G, B, K, x1, r, '|', .8, 4)
+    put(G, B, K, x0, y0 + 12, '+' + '-' * (WW - 2) + '+', .6, 4)
+    put(G, B, K, x0 + 3, y0 + 12, '[ log ]', .7, 4)
+    put(G, B, K, x0, y0 + 24, '|', .8, 4)
+    for r in range(y0 + 1, y0 + 12): put(G, B, K, x0 + 41, r, '|', .5, 4)
+    # source
+    for i, s in enumerate(SOURCE):
+        put(G, B, K, x0 + 2, y0 + 2 + i, s[:3], .5, 4)
+        put(G, B, K, x0 + 5, y0 + 2 + i, s[3:], 1., 0)
+    put(G, B, K, x0 + 21, y0 + 10, '^^', 1., 1)
+    put(G, B, K, x0 + 24, y0 + 10, 'expected Human', 1., 1)
+    # objections
+    rows, lit = session_rows(tv)
+    put(G, B, K, x0 + 43, y0 + 2, 'OBJECTIONS', .9, 0)
+    put(G, B, K, x0 + 54, y0 + 2, 'Turing 1950', .55, 4)
+    fired = {l for t0, s, k_, ty, l in SESSION if l and tv >= t0}
+    for i, name in enumerate(OBJ):
+        n = i + 1
+        line = f'{n} {name}'
+        if n == lit and (t < T_LOOP or (t * 8) % 1 < .6):
+            put(G, B, K, x0 + 43, y0 + 3 + i, line.ljust(20), 1., 2)
+        elif n in fired:
+            put(G, B, K, x0 + 43, y0 + 3 + i, line, .75, 1)
+        else:
+            put(G, B, K, x0 + 43, y0 + 3 + i, line, .55 if n != 3 else .7, 4)
+    # the log
+    vis = rows[-11:]
+    for i, (s, kind) in enumerate(vis):
+        put(G, B, K, x0 + 2, y0 + 13 + i, s[:WW - 4], 1., kind)
+    # status
+    sent = sum(1 for tt, s, k_ in loop_lines() if tt <= tv)
+    replies = 6 + sum(1 for tt, s, k_ in loop_lines() if tt <= min(tv, T_SILENT))
+    last = 0. if tv < T_SILENT else tv - T_SILENT
+    pend = max(0, sent - (replies - 6))
+    st = f' pending {pend:5d}   replies {replies:4d}   last reply {last:5.2f}s   user: me'
+    put(G, B, K, x0 + 1, y0 + 24, st[:WW - 2], .8, 4)
+    if pend > 40: put(G, B, K, x0 + 10, y0 + 24, f'{pend:5d}', 1., 1)
+    # the cursor
+    if t >= T_REVEAL + .3 and t < T_WEAR:
+        c, r = cursor_cell(t)
+        if (t * 2.6) % 1 < .6 or t > T_LOOP: put(G, B, K, c, r, ' ', 1., 2)
+    if t < T_WEAR: return G, B, K
+    # --- the screen can't keep up ---------------------------------------------------------------------------
+    rng = random.Random(int(t * 40))
+    for _ in range(int(6 * ease((t - T_WEAR) / .5))):            # stale rows, escape codes, a row thrown sideways
+        r = rng.randrange(y0 + 13, y0 + 24)
+        s = rng.choice(['^[[2K^[[1A', '^[[0m', '\\x1b[K', 'world.execute(lo', 'world.exec'])
+        put(G, B, K, x0 + 2 + rng.randrange(0, 40), r, s, .8, 4)
+    # the scroll region gives: the stream climbs over the panes, the frame, the error
+    pat = lambda c, r: 'exe '[(c + 2 * r) % 4]
+    if t < T_BREACH: return G, B, K
+    top_r = int(round(lerp(y1 + 1, y0 - 1, ease((t - T_BREACH) / .45))))   # the stream climbs: log, panes, frame
+    for r in range(max(top_r, y0), y1 + 1):
+        for c in range(x0, x1 + 1):
+            if rng.random() < .97: G[r, c] = GI.get(pat(c, r), 0) if pat(c, r) != ' ' else 0; B[r, c] = .75; K[r, c] = 0
+    if t < T_OUT: return G, B, K
+    # --- out of the window: every row runs on both ways; rows above and below follow ------------------------
+    cy = (y0 + y1) / 2
+    for r in range(ROWS):
+        dv = max(0, abs(r - cy) - WH / 2)
+        t0 = T_OUT + .022 * dv
+        if t < t0: continue
+        v = 120 + 60 * ((r * 7919) % 13) / 13
+        reach = v * (t - t0) ** 1.15 * 1.6
+        lo, hi = int(x0 - reach), int(x1 + reach)
+        for c in range(max(0, lo), min(COLS, hi + 1)):
+            ch = pat(c, r)
+            # each cell turns to EXE (s12's flood) a little after it is written
+            tw = t0 + abs((c - (x0 + x1) / 2)) / max(v * 1.6, 1) * .5
+            flip = tw + .12 + .3 * ((c * 31 + r * 17) % 23) / 23
+            if t >= flip or t >= 139.12:
+                K[r, c] = 3
+            else:
+                G[r, c] = GI.get(ch, 0) if ch != ' ' else 0; B[r, c] = .72; K[r, c] = 0
+    return G, B, K
+
+
+def cells_image(t):
+    G, B, K = term_cells(t)
+    a = np.zeros((ROWS, COLS, 4), np.uint8)
+    a[..., 0] = G; a[..., 1] = np.clip(B * 100, 0, 255).astype(np.uint8); a[..., 2] = K; a[..., 3] = 255
+    return Image.fromarray(a, 'RGBA')
+
+
+# ---- the paper, at time t ---------------------------------------------------------------------------------------
+def paper(t):
+    """RGBA, display-referred: the s10 page coming apart over the spread; the spread with its hand; the tears"""
+    if t >= T_REVEAL + .5: return None
+    spread = spread_static().copy()
+    lay, nib = annotations(t)
+    lay = lay.resize((1920, 1080), Image.LANCZOS)
+    spread.alpha_composite(lay)
+    slam = draw_stamp(spread, t)
+    # the s10 page over it, coming apart
+    if t < 125.9:
+        P = s10_page().convert('RGBA')
+        # the outer circle was drawn on that page: it goes with it
+        W, H = P.size
+        yy, xx = np.mgrid[0:H, 0:W]
+        side = (yy - 972) - .35 * (xx - 960)                 # below the cut: > 0
+        A = np.asarray(P).copy()
+        up = A.copy(); up[side > 0, 3] = 0
+        dn = A.copy(); dn[side <= 0, 3] = 0
+        # the strip below the cut drops away, turning a little
+        f = inc((t - T_OPEN) / .38)
+        dnI = Image.fromarray(dn).rotate(-9 * f, center=(74, 640), resample=Image.BICUBIC, translate=(0, 760 * f))
+        # the page turns over its left edge
+        g = ease((t - T_OPEN - .06) / .46)
+        upI = Image.fromarray(up)
+        if g > 0:
+            w = max(1, int(1772 * math.cos(g * math.pi / 2)))
+            sh = 1 - .55 * g
+            upI = upI.crop((74, 0, 1846, 1080)).resize((w, 1080), Image.BICUBIC)
+            arr = np.asarray(upI).astype(np.float32); arr[..., :3] *= sh; upI = Image.fromarray(arr.astype(np.uint8))
+            # its shadow on the spread, just right of the turning edge
+            shadow = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0))
+            ImageDraw.Draw(shadow).rectangle([74 + w, 22, 74 + w + 90 * (1 - g) + 10, 1058], fill=(0, 0, 0, int(140 * (1 - g))))
+            spread.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(28)))
+            base = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0)); base.alpha_composite(upI, (74, 0)); upI = base
+        spread.alpha_composite(dnI)
+        spread.alpha_composite(upI)
+    # tears: holes in the page, then the pieces fly
+    if t >= RIPS[0]:
+        big = spread.resize((1920 * SS, 1080 * SS), Image.BILINEAR)
+        alpha = big.getchannel('A').copy()
+        rim = Image.new('RGBA', big.size, (0, 0, 0, 0))
+        tear_holes(ImageDraw.Draw(alpha), ImageDraw.Draw(rim), t)
+        big.putalpha(alpha); big.alpha_composite(rim)
+        spread = big.resize((1920, 1080), Image.LANCZOS)
+        if t >= T_REVEAL:
+            u = clamp((t - T_REVEAL) / .42)
+            out = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0))
+            for k, (poly, (dx, dy)) in enumerate(pieces()):
+                m = Image.new('L', (1920, 1080), 0); ImageDraw.Draw(m).polygon(poly, fill=255)
+                pc = spread.copy(); pc.putalpha(Image.fromarray(np.minimum(np.asarray(m), np.asarray(spread.getchannel('A')))))
+                s = 1500 * u ** 1.6
+                ang = (18 if k % 2 else -14) * u ** 1.3
+                pc = pc.rotate(ang, center=STAMP_C, resample=Image.BICUBIC, translate=(dx * s, dy * s + 300 * u * u))
+                shd = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0)); shd.putalpha(pc.getchannel('A').point(lambda v: v * .55))
+                out.alpha_composite(shd.filter(ImageFilter.GaussianBlur(14)), (18, 26))
+                out.alpha_composite(pc)
+            spread = out
+    return spread, nib, slam
+
+
+def textures(t, w, h):
+    e = ease((t - 137.5) / 1.5)
+    POST.update(u_bloom=lerp(.5, .4, e), u_ca=lerp(.004, .005, e))
+    if 'atlas' not in _C: _C['atlas'] = T7.atlas()
+    pr = paper(t)
+    glow = Image.new('RGBA', (1920 * SS, 1080 * SS), (0, 0, 0, 255))
+    if pr is None:
+        P = _C.setdefault('blank', Image.new('RGBA', (1920, 1080), (0, 0, 0, 0)))
+        nib, slam = None, 0.
+    else:
+        P, nib, slam = pr
+    x, y, R, hg, a = ring_state(t, nib)
+    outer = (1 - ease((t - T_OPEN - .05) / .3)) if t >= T_OPEN else 1.
+    draw_ring(glow, x, y, R, hg, a, outer)
+    if nib is not None and a > 0:                             # the nib: a small hot point where it writes
+        ImageDraw.Draw(glow).ellipse([(nib[0] - 3) * SS, (nib[1] - 3) * SS, (nib[0] + 3) * SS, (nib[1] + 3) * SS], fill=(255, 236, 190, 255))
+    glow = glow.convert('RGB').resize((1920, 1080), Image.LANCZOS)
+    P = P.resize((w, h), Image.LANCZOS) if P.size != (w, h) else P
+    glow = glow.resize((w, h), Image.LANCZOS) if glow.size != (w, h) else glow
+    return {'u_glyphs': _C['atlas'], 'u_cells': cells_image(t), 'u_paper': P, 'u_glow': glow}
+
+
+def params(t):
+    sh = flash(t, T_ILL, 14)
+    for t0 in RIPS: sh += .6 * flash(t, t0, 18)
+    return dict(u_zoom=zoom_at(t), u_glowGain=2.6,
+                u_shake=(.004 * sh * math.sin(t * 97), .006 * sh * math.sin(t * 131)))

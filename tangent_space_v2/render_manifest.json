@@ -1,0 +1,15 @@
+{
+  "source_start": 33.4,
+  "source_end": 40.7,
+  "fps": 60,
+  "frames": 438,
+  "duration": 7.3,
+  "size": [
+    1920,
+    1080
+  ],
+  "elapsed": 4.217999999993481,
+  "subframes": 4,
+  "design": "Recomposed point body, circumferential hand-off, unfolding wave landscape and seven translucent tangent planes; camera moves into recipient space.",
+  "implementation": "New scene, point topology, camera and choreography; original engine reused as an independent snapshot."
+}

@@ -1,0 +1,177 @@
+"""t01 · gap ring prototype (0:47.0–1:00.2). Timing from LRC + onset analysis (beat ≈ 0.4635 s).
+
+blind my vision -> dizzy -> A.D to B.C (clocks / eras through the gap)
+-> the view keeps turning, the disk becomes Earth and time keeps running back:
+   Moon dissolves into a debris cloud, the debris spirals back into the impact point (unite so deeply),
+   Theia pulls out of the notch and flies off -> scan line turns it into a vector simulation.
+"""
+import sys, math, argparse, time
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / 'engine'))
+from gl import Renderer, encode, save_png
+
+START, END = 47.0, 60.2
+# beats from claude/engine/onsets.py
+B = dict(c1=47.837, c2=48.290, c3=48.754, c4=49.218, dz1=49.671, dz1m=50.136, dz2=50.600, dz2m=51.064,
+         travel=51.540, ad=53.386, bc=54.303, unite=55.232, conv=56.149, deep1=56.916, burst=57.067,
+         deep2=58.460, chorus=59.223)
+GAP_HIT = math.radians(330.)
+EXIT = math.radians(345.)
+PHOS = (.55, 1., .78)   # phosphor colour of the vector display
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def ramp(t, a, b): return ease((t - a) / (b - a))
+def lin(t, a, b): return clamp((t - a) / (b - a))
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def saccade(t, t0, a, b, dur, over=.07):
+    if t < t0: return a
+    x = (t - t0) / dur
+    if x < 1: return a + (b - a) * (1 + over) * outc(x)
+    return b + (b - a) * over * (1 - ease((t - t0 - dur) / .16))
+
+
+def gap_deg(t):
+    g = 90.
+    for t0, tgt, dur in ((B['dz1'], 160., .08), (B['dz1m'], 148., .05), (B['dz2'], 22., .11), (B['dz2m'], 34., .05)):
+        g = saccade(t, t0, g, tgt, dur)
+    if t >= B['travel']:                                   # deliberate counter-clockwise turn: time runs back
+        g = g + (90. - g) * ease((t - B['travel']) / .46)
+    g = saccade(t, B['ad'], g, 210., .12)
+    g = saccade(t, B['bc'], g, 330., .12)
+    g += 360. * ease((t - 54.42) / 1.05)                   # the view keeps turning while the disk becomes Earth
+    fix = 1 - ramp(t, 54.4, 54.6)
+    g += fix * (0.9 * math.sin(t * 7.3) + 0.5 * math.sin(t * 13.1 + 1.))   # fixational drift
+    return g
+
+
+def cam_for(t):
+    n = 8; ax = ay = 0.
+    for i in range(n):
+        g = math.radians(gap_deg(t - i * .025)); ax += math.cos(g); ay += math.sin(g)
+    k = .13 * ramp(t, B['dz1'], 51.3) / n
+    return ax * k, ay * k
+
+
+def params(t):
+    cover = sum(.2125 * outc((t - c) / .2) for c in (B['c1'], B['c2'], B['c3'], B['c4']))
+    half = math.pi * (1 - cover)
+    # the gap closes as the disk becomes Earth, and reopens when Theia pulls out of it
+    half *= 1 - ramp(t, 54.6, 55.35)
+    half += math.radians(27.) * ramp(t, B['burst'], B['burst'] + .6)
+    earth = ramp(t, 54.55, 55.35)
+    R = 1.25 + (.24 - 1.25) * ramp(t, B['dz1'], 51.3)
+    R += (.20 - .24) * ramp(t, 54.6, 55.4)
+    zoom = 1. + .32 * ramp(t, 54.6, 55.6)
+    cx, cy = cam_for(t)
+    cx, cy = cx * (1 - earth), cy * (1 - earth)
+    dizzy = ramp(t, 49.53, 49.8) * (1 - ramp(t, 51.4, 51.7))
+    focus = ramp(t, B['travel'], B['travel'] + .3)
+    tr = max(t - 51.3, 0.)
+    p = dict(u_R=R, u_half=half, u_gap=math.radians(gap_deg(t)), u_cam=(cx, cy), u_zoom=zoom,
+             u_token=1 - ramp(t, 48.9, 49.5), u_focus=focus, u_expo=.45 + .55 * focus, u_dizzy=dizzy,
+             u_planet=ramp(t, B['burst'] - .1, B['burst']), u_earth=earth,
+             u_clock=12 * 60 + 47 - tr * 97., u_gear=-tr * 2.4, u_hand=math.radians(262.) - tr * math.radians(24.),
+             u_shadow=math.radians(352.) - tr * math.radians(9.), u_reverse=-tr,
+             u_spin=-max(t - 54.3, 0.) * 1.6, u_geo=ramp(t, 55.35, 56.3), u_stars=.25 + .75 * earth)
+    # Moon: closer in the past, orbiting backwards, then torn into a ring
+    mbreak = ramp(t, 55.65, 56.15)
+    mdist = .62 - .22 * ramp(t, 54.9, 56.0)
+    mang = math.radians(120.) - max(t - 54.9, 0.) * (1.4 + 1.2 * ramp(t, 55.2, 56.2))
+    mr = .05 * ramp(t, 54.95, 55.3) * (1 - mbreak)
+    p.update(u_moon=(mdist * math.cos(mang), mdist * math.sin(mang), mr), u_mbreak=mbreak, u_mang=mang, u_mdist=mdist)
+    # debris spirals back into the impact point: an explosion played backwards looks like everything uniting
+    p['u_dvis'] = ramp(t, 55.7, 55.95) * (1 - ramp(t, B['burst'] - .05, B['burst'] + .05))
+    p['u_dphase'] = lin(t, B['conv'], B['burst'])
+    hit = (math.cos(GAP_HIT) * R * .9, math.sin(GAP_HIT) * R * .9)
+    p['u_hit'] = hit
+    x = lin(t, 56.55, B['burst'])
+    p['u_ring'] = .55 * (1 - x); p['u_ringA'] = (.2 + .8 * x) if 56.55 < t < B['burst'] else 0.
+    k = t - B['burst']
+    p['u_flash'] = .9 * math.exp(-(-k) * 7.) if k < 0 else .9 * math.exp(-k * 16.)
+    if t < 55.9: p['u_flash'] = 0.
+    # Theia pulls out of the notch and leaves
+    rt = .075
+    wall = rt / math.sin(math.radians(27.))
+    gx, gy = math.cos(GAP_HIT), math.sin(GAP_HIT)
+    inx, iny = gx * (wall - .09), gy * (wall - .09)
+    if k < 0:
+        tx, ty, trad, theat = inx, iny, 0., 0.
+    else:
+        trad = rt * ease(k / .55)
+        s = ease((k - .5) / .35)
+        tx, ty = inx + (gx * wall - inx) * s, iny + (gy * wall - iny) * s
+        dist = .38 * max(k - .85, 0.) ** 1.1
+        tx += math.cos(EXIT) * dist; ty += math.sin(EXIT) * dist
+        theat = .3 + 1.1 * math.exp(-k * 1.8)
+    p.update(u_tpos=(tx, ty), u_trad=trad, u_theat=theat, u_tvel=(math.cos(EXIT), math.sin(EXIT)),
+             u_merge=math.exp(-k * 1.5) if k > 0 else 0., u_melt=1.2 * math.exp(-k * .8) if k > 0 else 0.)
+    # scan line falls on the second "deeply" and redraws the world as a vector simulation
+    p['u_vec'] = 1. if t >= B['deep2'] else 0.
+    p['u_scan'] = .53 - 1.08 * outc(lin(t, B['deep2'], B['deep2'] + .66) * .9 + .1 * lin(t, B['deep2'], B['deep2'] + .66))
+    p['u_ui_on'] = 1. if t >= B['deep2'] else 0.
+    p['u_phos'] = PHOS
+    return p
+
+
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+_blank = {}
+
+
+def ui(t, w, h):
+    if t < B['deep2']:
+        if (w, h) not in _blank: _blank[(w, h)] = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        return {'u_ui': _blank[(w, h)]}
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); dr = ImageDraw.Draw(img)
+    fs = int(h * .021); f = ImageFont.truetype(FONT, fs); lh = int(fs * 1.5)
+    gyr = 4.5100 + (t - B['deep2']) * .0021
+    blocks = [
+        ((.045, .07), 'l', ['SIMULATION 0047', 'PROTO-EARTH / THEIA', 'MODE      REWIND ◀◀']),
+        ((.955, .07), 'r', [f'T   −{gyr:.4f} Gyr', 'Δt  −1.0e6 yr/s']),
+        ((.045, .80), 'l', ['M_THEIA    0.10 M_E', 'V_IMPACT   9.3 km/s', 'ANGLE      45°', 'STATUS     SEPARATION']),
+    ]
+    line_no = 0
+    for (fx, fy), align, lines in blocks:
+        for j, s in enumerate(lines):
+            y = int(fy * h) + j * lh
+            if (1 - y / h) - .5 < params(t)['u_scan']:     # not yet reached by the scan line
+                line_no += 1; continue
+            start = B['deep2'] + .18 + line_no * .06
+            n = int(len(s) * lin(t, start, start + .3)); line_no += 1
+            if n <= 0: continue
+            txt = s[:n] + ('▌' if n < len(s) else '')
+            x = int(fx * w) - (dr.textlength(s, font=f) if align == 'r' else 0)
+            dr.text((x, y), txt, font=f, fill=(255, 255, 255, 235))
+    return {'u_ui': img}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--w', type=int, default=1920); ap.add_argument('--h', type=int, default=1080)
+    ap.add_argument('--sub', type=int, default=4); ap.add_argument('--stills', type=str)
+    ap.add_argument('--out', type=str, default=str(HERE / 'preview_1080p.mp4'))
+    a = ap.parse_args()
+    r = Renderer(a.w, a.h, (HERE / 'scene.glsl').read_text(encoding='utf-8'), subframes=a.sub)
+    tex = lambda t: ui(t, a.w, a.h)
+    if a.stills:
+        (HERE / 'stills').mkdir(exist_ok=True)
+        for t in map(float, a.stills.split(',')):
+            save_png(r.frame(t, params, tex), a.w, a.h, HERE / 'stills' / f'{t:07.3f}.png'); print('still', t, flush=True)
+        return
+    fps = 60; n = round((END - START) * fps)
+    t0 = time.monotonic()
+    def frames():
+        for i in range(n):
+            if i % 120 == 0: print(f'{i}/{n}  {time.monotonic() - t0:.0f}s', flush=True)
+            yield r.frame(START + i / fps, params, tex)
+    encode(a.out, a.w, a.h, fps, START, END - START, frames())
+    print('done', a.out, f'{time.monotonic() - t0:.0f}s')
+
+
+if __name__ == '__main__':
+    main()

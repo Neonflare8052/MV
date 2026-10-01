@@ -1,0 +1,40 @@
+{
+  "passed": true,
+  "samples": [
+    {
+      "time": 39.04,
+      "sphere_gap": 0.0,
+      "tangent_offset": -3.2386221448717773e-12
+    },
+    {
+      "time": 39.1,
+      "sphere_gap": 0.0,
+      "tangent_offset": -3.3636508627257446e-12
+    },
+    {
+      "time": 39.4,
+      "sphere_gap": 0.0,
+      "tangent_offset": -2.3639796557922006e-12
+    },
+    {
+      "time": 39.7,
+      "sphere_gap": 2.7755575615628914e-17,
+      "tangent_offset": 3.298217737720242e-12
+    },
+    {
+      "time": 40.1,
+      "sphere_gap": 5.551115123125783e-17,
+      "tangent_offset": -2.3706708625879176e-12
+    },
+    {
+      "time": 40.4,
+      "sphere_gap": -1.3877787807814457e-17,
+      "tangent_offset": -4.417926539161163e-12
+    },
+    {
+      "time": 40.65,
+      "sphere_gap": 6.938893903907228e-17,
+      "tangent_offset": -4.181916943631571e-12
+    }
+  ]
+}

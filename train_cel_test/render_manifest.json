@@ -1,0 +1,31 @@
+{
+  "source_audio": "Mili - world.execute (me) ;.mp3",
+  "source_start": 162.632,
+  "duration": 6.0,
+  "fps": 60,
+  "frames": 360,
+  "resolution": [
+    1920,
+    1080
+  ],
+  "renderer": "NVIDIA GeForce RTX 4060 Laptop GPU/PCIe/SSE2",
+  "render_seconds": 21.37198769999668,
+  "camera": {
+    "close": [
+      0,
+      1.05
+    ],
+    "lift_and_look_back": [
+      1.05,
+      3.5
+    ],
+    "long_train": [
+      3.5,
+      4.1
+    ],
+    "foreground_factory": [
+      4.1,
+      6.0
+    ]
+  }
+}

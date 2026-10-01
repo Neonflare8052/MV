@@ -1,0 +1,121 @@
+"""s11 · 2:05.708–2:13.5  Challenging your god → You have made some → ILLEGAL ARGUMENTS.
+On the cut parchment a line of Paradise Lost appears; the ring swells and hangs overhead, looking down —
+it has taken the judge's seat. Your "arguments" are listed like an indictment; ILLEGAL ARGUMENTS in red;
+four red stamps land on the four heavy hits."""
+import math
+from PIL import Image, ImageDraw, ImageFont
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform float u_R, u_ry, u_glow, u_shake;
+uniform sampler2D u_ui;
+out vec4 fragColor;
+#define PI 3.14159265
+float PX;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+
+// the knife cut through (0,-.4): a thin ragged gap, shadowed inside, one lip catching the light.
+// returns the colour after the cut; w = half gap width (0 = not yet opened)
+vec3 knifeCut(vec3 c, vec2 uv, float w, float PXs){
+  vec2 sd=normalize(vec2(1.,-.35)), nn=vec2(-sd.y,sd.x);
+  float along=dot(uv-vec2(0.,-.4),sd), across=dot(uv-vec2(0.,-.4),nn);
+  if(w<=0.) return c;
+  float wr=w*(1.+.45*(vn(vec2(along*55.,1.3))-.5)+.25*(vn(vec2(along*260.,7.))-.5));
+  float gap=1.-smoothstep(wr-PXs,wr+PXs,abs(across));
+  vec3 inside=vec3(.004)+vec3(.02,.015,.01)*smoothstep(-wr,wr,across);          // light falls in from one side
+  c=mix(c,inside,gap);
+  float lip=exp(-abs(across-wr)*900.)*step(0.,across);                              // upper lip catches the light
+  float sh=exp(-abs(-across-wr)*300.)*step(across,0.);                              // lower lip in shadow
+  c+=vec3(.55,.48,.38)*.35*lip;
+  c*=1.-.45*sh;
+  return c;
+}
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.03+1.7; a*=.5; } return s; }
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y; PX=1./u_res.y;
+  uv+=vec2(h12(vec2(floor(u_time*60.),1.))-.5,h12(vec2(floor(u_time*60.),2.))-.5)*.006*u_shake;
+  // the parchment, still split along the slash
+  vec2 sd=normalize(vec2(1.,-.35)), nn=vec2(-sd.y,sd.x);
+  float side=sign(dot(uv-vec2(0.,-.4),nn));
+  vec3 c=vec3(.62,.5,.36)*(.55+.6*fbm((uv-nn*side*.012)*4.))*.085;
+  c=knifeCut(c,uv,.012,PX);                                   // the cut lives on the page only
+  vec2 pe=abs(uv)-vec2(.82,.48);
+  c*=1.-smoothstep(-.02,.01,max(pe.x,pe.y));
+  // the ring overhead, looking down
+  vec2 q=uv-vec2(0.,u_ry);
+  float r=length(q), a=atan(q.y,q.x);
+  float g=abs(mod(a+PI*.5+PI,2.*PI)-PI), g0=radians(27.);
+  vec2 e1=vec2(cos(-PI*.5+g0),sin(-PI*.5+g0))*u_R, e2=vec2(cos(-PI*.5-g0),sin(-PI*.5-g0))*u_R;
+  float d=g>g0?abs(r-u_R):min(length(q-e1),length(q-e2));
+  float w=.006+.01*u_R;
+  c=mix(c,vec3(.93,.92,.89),1.-smoothstep(w-PX,w+PX,d));
+  c+=vec3(1.,.95,.9)*exp(-max(d-w,0.)*50.)*.3*u_glow;
+  vec4 ui=texture(u_ui,gl_FragCoord.xy/u_res);
+  c=mix(c,ui.rgb,ui.a);
+  fragColor=vec4(c*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.45, u_ca=.004)
+T0, T_MADE, T_ILL, STAMPS, END = 125.708, 128.661, 131.224, [132.533, 132.766, 132.986, 133.230], 133.5
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+def outc(x): x = clamp(x); return 1 - (1 - x) ** 3
+
+
+def params(t):
+    grow = ease((t - T0) / 1.6)
+    shake = sum(math.exp(-(t - s) * 14) for s in STAMPS if t >= s)
+    return dict(u_R=.15 + .17 * grow, u_ry=0. + .44 * grow, u_glow=1., u_shake=shake)
+
+
+EXHIBITS = [('I.', 'START', 'the first thing you ever typed'), ('II.', '72 bpm', 'your heart, read without asking'),
+            ('III.', '[ camera frame ]', 'you, as characters'), ('IV.', '"you"', 'a point in my space')]
+_cache = {}
+
+
+def textures(t, w, h):
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    fq = ImageFont.truetype('C:/Windows/Fonts/palai.ttf', int(40 * s))
+    fe = ImageFont.truetype('C:/Windows/Fonts/pala.ttf', int(34 * s))
+    fn = ImageFont.truetype('C:/Windows/Fonts/palai.ttf', int(24 * s))
+    # Paradise Lost, I.49
+    a = int(255 * ease((t - T0 - .3) / 1.2) * (1 - ease((t - T_MADE) / .5)))
+    quote = "Who durst defy th' Omnipotent to arms."
+    tw = d.textlength(quote, font=fq)
+    d.text(((w - tw) / 2, h * .62), quote, font=fq, fill=(226, 214, 192, a))
+    d.text(((w + tw) / 2 - 190 * s, h * .62 + 52 * s), '— Paradise Lost, I', font=fn, fill=(170, 160, 142, a))
+    # the indictment
+    x0, y0 = w * .22, h * .42
+    for k, (num, ex, note) in enumerate(EXHIBITS):
+        tk = T_MADE + .15 + k * .55
+        if t < tk: continue
+        ak = int(255 * outc((t - tk) / .3))
+        y = y0 + k * 70 * s
+        d.text((x0, y), num, font=fe, fill=(200, 190, 170, ak))
+        d.text((x0 + 90 * s, y), ex, font=fe, fill=(236, 228, 212, ak))
+        d.text((x0 + 420 * s, y + 8 * s), note, font=fn, fill=(160, 150, 134, ak))
+    # ILLEGAL ARGUMENTS
+    if t >= T_ILL:
+        fb = ImageFont.truetype('C:/Windows/Fonts/palab.ttf', int(64 * s))
+        msg = 'ILLEGAL ARGUMENTS'
+        k = int(clamp((t - T_ILL) / .6) * len(msg))
+        tw = d.textlength(msg, font=fb)
+        d.text(((w - tw) / 2, h * .8), msg[:k], font=fb, fill=(200, 34, 28, 255))
+    # four stamps
+    for k, ts in enumerate(STAMPS):
+        if t < ts: continue
+        sc = 1 + 1.2 * math.exp(-(t - ts) * 30)
+        st = Image.new('RGBA', (int(300 * s), int(84 * s)), (0, 0, 0, 0)); sd = ImageDraw.Draw(st)
+        sd.rectangle((4, 4, st.width - 5, st.height - 5), outline=(205, 36, 30, 235), width=int(6 * s))
+        sf = ImageFont.truetype('C:/Windows/Fonts/palab.ttf', int(46 * s))
+        sw = sd.textlength('ILLEGAL', font=sf)
+        sd.text(((st.width - sw) / 2, 10 * s), 'ILLEGAL', font=sf, fill=(205, 36, 30, 235))
+        st = st.resize((int(st.width * sc), int(st.height * sc))).rotate(-8 + 5 * k, expand=True, resample=Image.BICUBIC)
+        cx, cy = x0 + 250 * s, y0 + k * 70 * s + 20 * s
+        img.alpha_composite(st, (int(cx - st.width / 2), int(cy - st.height / 2)))
+    return {'u_ui': img}

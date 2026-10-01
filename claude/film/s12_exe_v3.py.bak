@@ -1,0 +1,201 @@
+"""s12 · 2:13.5–2:24.8  the paper is blown away; the terminal; execute(make_you_happy) typed faster and shorter
+until it is only exe; EXE floods the screen; the flood's density becomes the ASCII eye, which starts to look around.
+Hands over to the teletype shot (t06) at 2:24.8 with the same eye field and the same iris motion."""
+import math
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+
+T6 = Path(__file__).resolve().parents[2] / 'tests' / 't06_teletype'
+_t6 = (T6 / 'scene.glsl').read_text(encoding='utf-8')
+EYE_GLSL = _t6[_t6.index('// ---------------- the ASCII eye'):_t6.index('// ---------------- flat terminal')]
+
+SRC = r'''#version 330
+uniform vec2 u_res; uniform float u_time, u_weight;
+uniform float u_bang; uniform vec2 u_iris; uniform float u_gapA;
+uniform float u_blow;           // paper strips blown away 0..1
+uniform float u_flood;          // EXE flood coverage 0..1
+uniform float u_eyeMix;         // flood -> eye field 0..1
+uniform float u_typed[12];      // (unused by the eye field; kept for the shared code)
+uniform sampler2D u_glyphs, u_ui, u_last;
+uniform float u_deg, u_glitch;   // the judgement page degrading into characters; the hit
+out vec4 fragColor;
+#define PI 3.14159265
+const float NG=42.;
+float h12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h12(i),h12(i+vec2(1,0)),f.x),mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x),f.y); }
+float fbm(vec2 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.03+1.7; a*=.5; } return s; }
+''' + EYE_GLSL + r'''
+vec3 field(vec2 uv){
+  vec2 cell=vec2(1.62/COLS,.92/ROWS);
+  LOD=max(log2(48./(cell.x*u_res.y)),0.);
+  vec2 g=(uv+vec2(.81,-.46))/cell*vec2(1.,-1.);
+  float col=floor(g.x), row=floor(g.y);
+  vec2 f=vec2(fract(g.x),1.-fract(g.y));
+  if(col<0.||col>COLS-1.||row<0.||row>=ROWS) return vec3(0.);
+  float r1=h12(vec2(col,row)*.77+3.1), r2=h12(vec2(row,col)*.53+7.3);
+  vec3 gl=vec3(0.);
+  if(r1<u_flood){                                            // the flood: EXE EXE EXE
+    float k=mod(col+row*2.,4.);
+    gl=vec3(k==1.?12.:(k==3.?0.:11.),.55+.25*h12(vec2(col,row)),0.);
+  }
+  if(r2<u_eyeMix) gl=glyphAt(col,row);                       // the flood settles into the eye
+  float m=glyphMask(gl.x,f);
+  return vec3(.9,.92,.9)*m*gl.y*(1.+.8*gl.y);
+}
+
+// the knife cut through (0,-.4): a thin ragged gap, shadowed inside, one lip catching the light.
+// returns the colour after the cut; w = half gap width (0 = not yet opened)
+vec3 knifeCut(vec3 c, vec2 uv, float w, float PXs){
+  vec2 sd=normalize(vec2(1.,-.35)), nn=vec2(-sd.y,sd.x);
+  float along=dot(uv-vec2(0.,-.4),sd), across=dot(uv-vec2(0.,-.4),nn);
+  if(w<=0.) return c;
+  float wr=w*(1.+.45*(vn(vec2(along*55.,1.3))-.5)+.25*(vn(vec2(along*260.,7.))-.5));
+  float gap=1.-smoothstep(wr-PXs,wr+PXs,abs(across));
+  vec3 inside=vec3(.004)+vec3(.02,.015,.01)*smoothstep(-wr,wr,across);          // light falls in from one side
+  c=mix(c,inside,gap);
+  float lip=exp(-abs(across-wr)*900.)*step(0.,across);                              // upper lip catches the light
+  float sh=exp(-abs(-across-wr)*300.)*step(across,0.);                              // lower lip in shadow
+  c+=vec3(.55,.48,.38)*.35*lip;
+  c*=1.-.45*sh;
+  return c;
+}
+vec3 parchment(vec2 p){
+  vec3 c=vec3(.62,.5,.36)*(.55+.6*fbm(p*4.))*.085;
+  c=knifeCut(c,p,.012,1./u_res.y);
+  vec2 pe=abs(p)-vec2(.82,.48);
+  return c*(1.-smoothstep(-.02,.01,max(pe.x,pe.y)));
+}
+// ---- the page, degrading: pixels → coarser blocks → characters → gone -----------------------------------------
+vec3 ungrade(vec3 d){                                   // display colour back to scene light
+  vec3 x=pow(max(d,vec3(0.)),vec3(2.2));
+  vec3 a=2.51-2.43*x, b=.03-.59*x, c=-.14*x;
+  return (-b+sqrt(b*b-4.*a*c))/(2.*a)/1.05;
+}
+vec3 lastAt(vec2 uv, float split){                      // the saved frame at screen uv (height units), with an RGB split
+  vec2 s=uv*vec2(u_res.y/u_res.x,1.)+.5;
+  vec3 c=vec3(texture(u_last,s+vec2(split,0.)).r,texture(u_last,s).g,texture(u_last,s-vec2(split,0.)).b);
+  vec2 d=s-.5; return ungrade(c)/(1.-.9*dot(d,d));
+}
+vec3 degraded(vec2 uv){
+  vec2 cell=vec2(1.62/COLS,.92/ROWS)*3.;                // coarse: readable characters
+  float x=u_deg;
+  // the hit: rows of the page thrown sideways for a few frames
+  float band=floor(uv.y*28.+floor(u_time*60.)*3.1);
+  uv.x+=u_glitch*(h12(vec2(band,floor(u_time*60.)))-.5)*.09*step(.55,h12(vec2(band,7.)));
+  float split=u_glitch*.006+x*.002;
+  if(x<.45){                                            // blocks growing to the size of a character cell
+    float k=mix(1./u_res.y,cell.x,pow(x/.45,2.));
+    vec2 b=(floor(uv/vec2(k,k*cell.y/cell.x))+.5)*vec2(k,k*cell.y/cell.x);
+    vec2 sb=b*vec2(u_res.y/u_res.x,1.)+.5;
+    vec3 dc=vec3(texture(u_last,sb+vec2(split,0.)).r,texture(u_last,sb).g,texture(u_last,sb-vec2(split,0.)).b);
+    float lv=mix(64.,6.,x/.45);                          // fewer and fewer levels
+    dc=floor(dc*lv+.5)/lv;
+    vec2 d=sb-.5;
+    return ungrade(clamp(dc,0.,.98))/(1.-.9*dot(d,d));
+  }
+  // one character per cell, chosen by the cell's brightness; colours drain to the terminal's grey
+  vec2 g=(uv+vec2(.81,-.46))/cell*vec2(1.,-1.);
+  float col=floor(g.x), row=floor(g.y);
+  vec2 f=vec2(fract(g.x),1.-fract(g.y));
+  vec2 cc=vec2((col+.5)*cell.x-.81,.46-(row+.5)*cell.y);
+  vec3 c=lastAt(cc,split);
+  vec2 sc=cc*vec2(u_res.y/u_res.x,1.)+.5;
+  vec3 disp=texture(u_last,sc).rgb;                     // the frame's own colour (no hue shift)
+  float L=clamp(log2(max(dot(c,vec3(.3,.55,.15)),1e-4)/.018)/5.2,0.,1.);
+  float gi=floor(L*9.99);
+  LOD=max(log2(48./(cell.x*u_res.y)),0.);
+  float m=glyphMask(gi,f);
+  float y=clamp((x-.45)/.3,0.,1.);                       // blocks → glyphs
+  vec3 block=ungrade(clamp(floor(disp*6.+.5)/6.,0.,.98));
+  float z=clamp((x-.72)/.28,0.,1.);                      // then grey, then gone
+  vec3 gc=mix(pow(disp,vec3(2.2))*2.2+vec3(.015),vec3(.9,.92,.9)*L*.9,z*.8)*m;
+  return mix(block,gc,y)*(1.-z*z);
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*u_res)/u_res.y;
+  if(u_deg>=0.&&u_deg<1.){ vec3 c=degraded(uv); vec4 ui0=texture(u_ui,gl_FragCoord.xy/u_res); c=mix(c,ui0.rgb,ui0.a); fragColor=vec4(c*u_weight,1.); return; }
+  vec3 col=vec3(.012)+field(uv);
+  vec4 ui=texture(u_ui,gl_FragCoord.xy/u_res);
+  col=mix(col,ui.rgb,ui.a);
+  // the torn parchment, blown away in strips (drawn over the terminal until it is gone)
+  if(u_blow<1.){
+    for(int k=0;k<7;k++){
+      float fk=float(k);
+      float y0=-.5+fk/7., y1=y0+1./7.;
+      float delay=h12(vec2(fk,2.))*.35;
+      float b=clamp((u_blow-delay)/(1.-delay),0.,1.); b=b*b;
+      vec2 off=vec2(1.6+.6*h12(vec2(fk,4.)),.5+.7*h12(vec2(fk,5.)))*b;
+      float ang=(h12(vec2(fk,6.))-.3)*2.2*b;
+      vec2 c=vec2(0.,(y0+y1)*.5);
+      vec2 p=uv-c-off; float ca=cos(-ang), sa=sin(-ang); p=mat2(ca,sa,-sa,ca)*p; p+=c;
+      if(p.y>y0&&p.y<y1&&abs(p.x)<.9) { col=parchment(p)+vec3(.02)*b; }
+    }
+  }
+  fragColor=vec4(col*u_weight,1.);
+}
+'''
+POST = dict(u_bloom=.4, u_ca=.005)
+FONT = 'C:/Windows/Fonts/CascadiaMono.ttf'
+T0, T_TYPE, T_FLOOD, T_EYE, T_LOOK, END = 133.5, 134.0, 137.4, 139.2, 141.2, 144.8
+T_HIT, T_GONE = 133.230, 133.95
+
+
+def clamp(x, a=0., b=1.): return max(a, min(b, x))
+def ease(x): x = clamp(x); return x * x * (3 - 2 * x)
+
+
+def iris_at(t):
+    """identical to the teletype shot before BANG, so the hand-off is seamless"""
+    ph = t * 1.7
+    iris = (.12 * math.sin(ph * 2.3) * (1 if int(ph * 3) % 2 else -1), .05 * math.sin(ph * 3.1))
+    gapA = math.radians(-90 + 60 * math.sin(t * 2.))
+    return iris, gapA
+
+
+def params(t):
+    iris, gapA = iris_at(t)
+    look = ease((t - T_LOOK) / .6)
+    iris = (iris[0] * look, iris[1] * look)
+    return dict(u_deg=(t - T_HIT) / (T_GONE - T_HIT) if T_HIT <= t < T_GONE else -1.,
+                u_glitch=1. - ease((t - T_HIT - .03) / .07) if t >= T_HIT else 0.,
+                u_bang=0., u_iris=iris, u_gapA=gapA, u_blow=1., u_flood=ease((t - T_FLOOD) / 1.6),
+                u_eyeMix=ease((t - T_EYE) / 1.8), u_typed=[0.] * 12)
+
+
+# the degradation: the command typed again and again, faster, shorter
+CMD = 'execute(make_you_happy)'
+LINES = []
+_tt = T_TYPE
+for k in range(46):
+    L = len(CMD) if k < 6 else max(3, int(len(CMD) * (1 - (k - 6) / 30)))
+    s = CMD[:L]
+    if L <= 4: s = 'exe'
+    LINES.append((_tt, s))
+    _tt += max(.045, .42 * .88 ** k)
+_glyphs = {}
+
+
+def textures(t, w, h):
+    if 'g' not in _glyphs: _glyphs['g'] = Image.open(T6 / 'glyphs.png')
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
+    s = h / 1080
+    f = ImageFont.truetype(FONT, int(26 * s)); lh = int(34 * s)
+    fade = 1 - ease((t - T_FLOOD - .4) / 1.2)
+    if fade > 0 and t >= T_TYPE:
+        shown = [(tt, x) for tt, x in LINES if t >= tt]
+        rows = []
+        for tt, x in shown:
+            k = int(clamp((t - tt) / max(.04, len(x) * .012)) * len(x))
+            rows.append(('> ' if x != 'exe' else '') + x[:k])
+        # exe fills lines, several per row, faster and faster
+        packed = []
+        for r in rows:
+            if r == 'exe' and packed and packed[-1].startswith('exe') and len(packed[-1]) < 60: packed[-1] += ' exe'
+            else: packed.append(r)
+        packed = packed[-int((h - 120 * s) / lh):]
+        for i, r in enumerate(packed):
+            d.text((90 * s, 60 * s + i * lh), r, font=f, fill=(226, 224, 216, int(255 * fade)))
+    if 'last' not in _glyphs: _glyphs['last'] = Image.open(Path(__file__).resolve().parents[1] / 'assets' / 'judgement_last.png').convert('RGB')
+    return {'u_ui': img, 'u_glyphs': _glyphs['g'], 'u_last': _glyphs['last']}
