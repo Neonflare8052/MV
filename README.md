@@ -46,9 +46,9 @@ python master.py --start 161.5 --end 190 --out part.mp4
 
 ## 许可
 
-- 代码：[MIT](LICENSE)
-- 文档与图片：[CC BY-NC 4.0](LICENSE-CONTENT.md)
-- 原曲、歌词、引用的历史文本不在上述许可之内，见 [LICENSE-CONTENT.md](LICENSE-CONTENT.md)。
+- 代码（`*.py`、`*.glsl`、`*.frag`、`*.vert` 等程序文件）：[MIT](LICENSE)
+- 文档与图片（`*.md`、`*.txt`、分镜与图片）：[CC BY-NC 4.0](docs/CONTENT-LICENSE.md)
+- 原曲、歌词、引用的历史文本不在上述许可之内，见 [docs/CONTENT-LICENSE.md](docs/CONTENT-LICENSE.md)。
 
 ## 致谢
 
